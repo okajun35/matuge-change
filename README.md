@@ -38,7 +38,7 @@ uvicorn backend.app:app --host 0.0.0.0 --port 8000
 
 1. 装着画像（必要なら未装着画像も）をアップロードして「解析開始」
 2. 表示レイヤーを Probability に切り替えて初期推定を確認
-3. ＋商品 / ？中間 / −背景 ブラシで必要な箇所だけ補正（中間は Trimap の Unknown 帯に強制し Matting に境界判定を任せる）
+3. ＋商品 / ？中間 / −背景 ブラシで必要な箇所だけ補正（中間は Trimap の Unknown 帯に強制し Matting に境界判定を任せる）。ストローク単位で Undo/Redo 可能（↶/↷ ボタン or Ctrl+Z / Ctrl+Y）
 4. 「Matting実行」→ Alpha / Product RGBA / 未装着画像への再合成を確認
 5. FG/BG 閾値スライダーで Trimap を調整して再実行可能
 6. AI 加工済みのモデル画像を「編集済み画像」に選択して「再合成」→ 抽出まつ毛を位置合わせして合成

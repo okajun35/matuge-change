@@ -41,6 +41,8 @@
     <button id="btnNone" class="secondary">オフ</button>
   </label>
   <label>サイズ <input type="range" id="brushSize" min="2" max="60" value="14"></label>
+  <button id="btnUndo" class="secondary" disabled>↶ 元に戻す</button>
+  <button id="btnRedo" class="secondary" disabled>↷ やり直す</button>
   <button id="btnClear" class="secondary">ブラシ消去</button>
   <span style="border-left:1px solid #555;height:24px"></span>
   <label>FG閾値 <input type="range" id="fgThresh" min="30" max="95" value="70"></label>
@@ -106,10 +108,50 @@ function showLayer(name) {
 }
 
 let paintBackup = null;
+const undoStack = [], redoStack = [];
+const MAX_HISTORY = 30;
 function restorePaint() {
   if (paintBackup) pctx.putImageData(paintBackup, 0, 0);
 }
-function savePaint() { paintBackup = pctx.getImageData(0, 0, state.w, state.h); }
+function updateHistoryButtons() {
+  document.getElementById('btnUndo').disabled = !undoStack.length;
+  document.getElementById('btnRedo').disabled = !redoStack.length;
+}
+function resetHistory() {
+  undoStack.length = 0; redoStack.length = 0;
+  updateHistoryButtons();
+}
+function savePaint() {
+  undoStack.push(paintBackup);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
+  redoStack.length = 0;
+  paintBackup = pctx.getImageData(0, 0, state.w, state.h);
+  updateHistoryButtons();
+}
+function applyPaint(snap) {
+  paintBackup = snap;
+  pctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+  restorePaint();
+  updateHistoryButtons();
+}
+function undoPaint() {
+  if (!undoStack.length) return;
+  redoStack.push(paintBackup);
+  applyPaint(undoStack.pop());
+}
+function redoPaint() {
+  if (!redoStack.length) return;
+  undoStack.push(paintBackup);
+  applyPaint(redoStack.pop());
+}
+document.getElementById('btnUndo').onclick = undoPaint;
+document.getElementById('btnRedo').onclick = redoPaint;
+window.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoPaint(); }
+  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoPaint(); }
+});
 
 document.getElementById('btnUpload').onclick = async () => {
   const fw = document.getElementById('fileWith').files[0];
@@ -125,6 +167,7 @@ document.getElementById('btnUpload').onclick = async () => {
   state.session = data.session_id;
   state.w = data.width; state.h = data.height;
   paintBackup = null;
+  resetHistory();
   pctx.clearRect(0, 0, 4096, 4096);
   setLayerOptions(data.layers);
   status(`解析完了 (session ${data.session_id})。Probability を確認し、必要ならブラシで補正して Matting を実行してください。`);
@@ -145,6 +188,7 @@ document.getElementById('btnUnknown').onclick = (e) => setBrush('unknown', e.tar
 document.getElementById('btnRemove').onclick = (e) => setBrush('remove', e.target);
 document.getElementById('btnNone').onclick = () => setBrush(null, null);
 document.getElementById('btnClear').onclick = () => { pctx.clearRect(0, 0, state.w, state.h); savePaint(); };
+updateHistoryButtons();
 setBrush(null, null);
 
 function paintAt(e) {
