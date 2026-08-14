@@ -78,9 +78,7 @@ def crop_roi(img: np.ndarray, roi: EyeRoi) -> np.ndarray:
     return crop
 
 
-def align_b_to_a(
-    img_a: np.ndarray, lms_a: np.ndarray, img_b: np.ndarray, lms_b: np.ndarray
-) -> np.ndarray:
+def align_b_to_a(img_a: np.ndarray, lms_a: np.ndarray, img_b: np.ndarray, lms_b: np.ndarray) -> np.ndarray:
     """Warp image B (bare) onto image A (with product) using landmark affine + ECC refine."""
     src = lms_b[ALIGN_POINTS].astype(np.float32)
     dst = lms_a[ALIGN_POINTS].astype(np.float32)
@@ -102,7 +100,9 @@ def ecc_refine(roi_a: np.ndarray, roi_b: np.ndarray) -> np.ndarray:
         _, warp = cv2.findTransformECC(ga, gb, warp, cv2.MOTION_EUCLIDEAN, criteria, None, 5)
         h, w = roi_a.shape[:2]
         return cv2.warpAffine(
-            roi_b, warp, (w, h),
+            roi_b,
+            warp,
+            (w, h),
             flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
             borderMode=cv2.BORDER_REPLICATE,
         )
@@ -110,9 +110,13 @@ def ecc_refine(roi_a: np.ndarray, roi_b: np.ndarray) -> np.ndarray:
         return roi_b
 
 
-def _norm_percentile(x: np.ndarray, lo: float = 50.0, hi: float = 99.5) -> np.ndarray:
+def _norm_percentile(
+    x: np.ndarray, lo: float = 50.0, hi: float = 99.5, min_range: float = 1e-3
+) -> np.ndarray:
+    """Percentile stretch to [0,1]. Inputs are on a 0-255 scale, so a spread below
+    ``min_range`` carries no signal and is treated as flat (avoids amplifying noise)."""
     plo, phi = np.percentile(x, [lo, hi])
-    if phi - plo < 1e-6:
+    if phi - plo < min_range:
         return np.zeros_like(x)
     return np.clip((x - plo) / (phi - plo), 0.0, 1.0)
 
@@ -129,7 +133,11 @@ def difference_map(roi_a: np.ndarray, roi_b: np.ndarray) -> np.ndarray:
     grad_a = cv2.magnitude(cv2.Sobel(ga, cv2.CV_32F, 1, 0), cv2.Sobel(ga, cv2.CV_32F, 0, 1))
     grad_b = cv2.magnitude(cv2.Sobel(gb, cv2.CV_32F, 1, 0), cv2.Sobel(gb, cv2.CV_32F, 0, 1))
     grad_diff = np.clip(grad_a - grad_b, 0, None)
-    d = 0.6 * _norm_percentile(darkening) + 0.15 * _norm_percentile(chroma) + 0.25 * _norm_percentile(grad_diff)
+    d = (
+        0.6 * _norm_percentile(darkening)
+        + 0.15 * _norm_percentile(chroma)
+        + 0.25 * _norm_percentile(grad_diff)
+    )
     return np.clip(d, 0.0, 1.0)
 
 
@@ -172,9 +180,7 @@ def build_trimap(
     """
     fg = prob >= fg_thresh
     maybe = prob >= bg_thresh
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (2 * unknown_band_px + 1, 2 * unknown_band_px + 1)
-    )
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * unknown_band_px + 1, 2 * unknown_band_px + 1))
     unknown = cv2.dilate(maybe.astype(np.uint8), kernel).astype(bool)
     trimap = np.zeros(prob.shape, np.uint8)
     trimap[unknown] = 128
@@ -226,8 +232,12 @@ def recompose_onto(
     m_total = (np.vstack([m_ae, [0, 0, 1]]) @ m_roi_to_a)[:2]
     h, w = edited_bgr.shape[:2]
     warped = cv2.warpAffine(
-        rgba_roi, m_total, (w, h),
-        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+        rgba_roi,
+        m_total,
+        (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0, 0),
     )
     alpha = warped[..., 3:4].astype(np.float64) / 255.0
     fg = warped[..., :3].astype(np.float64) / 255.0

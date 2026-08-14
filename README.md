@@ -25,12 +25,29 @@ curl -sL -o models/face_landmarker.task --create-dirs \
   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 ```
 
-## テスト
+## テスト・Lint
 
 ```bash
 uv pip install -r requirements-dev.txt
-python -m pytest tests/ -q
+python -m pytest          # テスト
+ruff check                # Lint
+ruff format               # フォーマット
 ```
+
+pre-commit（commit 時に自動で lint / format / 各種チェック）:
+
+```bash
+pre-commit install
+pre-commit run --all-files   # 手動で全ファイルにかける場合
+```
+
+GitHub Actions（`.github/workflows/ci.yml`）で PR / main push 時に
+`ruff check` / `ruff format --check` と `pytest` が実行される。
+
+## ドキュメント
+
+- [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
+- [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（抽出は 1 回・ランドマーク追従 warp、スタビライズ）
 
 ## 起動
 
