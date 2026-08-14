@@ -85,6 +85,7 @@ async def create_session(
     imwrite(os.path.join(sdir, "difference.png"), gray_png(evidence))
     imwrite(os.path.join(sdir, "probability.png"), gray_png(prob))
     np.save(os.path.join(sdir, "probability.npy"), prob)
+    np.save(os.path.join(sdir, "landmarks.npy"), lms_a)
     with open(os.path.join(sdir, "meta.json"), "w") as f:
         json.dump(
             {
@@ -150,6 +151,29 @@ async def run_matte(
         layers.append("composite_on_bare")
 
     return {"layers": layers, "reconstruction_error": recon_err}
+
+
+@app.post("/api/recompose")
+async def recompose(
+    session_id: str = Form(...),
+    edited_image: UploadFile = File(...),
+):
+    sdir = session_dir(session_id)
+    rgba_path = os.path.join(sdir, "product_rgba.png")
+    if not os.path.exists(rgba_path):
+        raise HTTPException(409, "run matting first")
+    rgba = cv2.imread(rgba_path, cv2.IMREAD_UNCHANGED)
+    lms_worn = np.load(os.path.join(sdir, "landmarks.npy"))
+    with open(os.path.join(sdir, "meta.json")) as f:
+        meta = json.load(f)
+    x0, y0, x1, y1 = meta["roi"]
+    roi = pipeline.EyeRoi(x0, y0, x1, y1, meta["scale"])
+    edited = read_upload(edited_image)
+    out = pipeline.recompose_onto(rgba, roi, lms_worn, edited)
+    if out is None:
+        raise HTTPException(422, "no face detected in the edited image")
+    imwrite(os.path.join(sdir, "composite_on_edited.png"), out)
+    return {"layers": ["composite_on_edited"]}
 
 
 @app.get("/api/image/{session_id}/{name}")

@@ -201,6 +201,39 @@ def composite(alpha: np.ndarray, fg_bgr: np.ndarray, base_bgr: np.ndarray) -> np
     return (np.clip(out, 0, 1) * 255).astype(np.uint8)
 
 
+def recompose_onto(
+    rgba_roi: np.ndarray,
+    roi: EyeRoi,
+    lms_worn: np.ndarray,
+    edited_bgr: np.ndarray,
+) -> np.ndarray | None:
+    """Composite an extracted ROI-space product RGBA onto an edited model image.
+
+    Maps ROI coords -> worn-image coords -> edited-image coords (landmark affine),
+    then alpha-blends. Returns None if no face is detected in the edited image.
+    """
+    lms_edit = detect_landmarks(edited_bgr)
+    if lms_edit is None:
+        return None
+    src = lms_worn[ALIGN_POINTS].astype(np.float32)
+    dst = lms_edit[ALIGN_POINTS].astype(np.float32)
+    m_ae, _ = cv2.estimateAffinePartial2D(src, dst, method=cv2.LMEDS)
+    if m_ae is None:
+        return None
+    inv_s = 1.0 / roi.scale
+    m_roi_to_a = np.array([[inv_s, 0, roi.x0], [0, inv_s, roi.y0], [0, 0, 1]], dtype=np.float64)
+    m_total = (np.vstack([m_ae, [0, 0, 1]]) @ m_roi_to_a)[:2]
+    h, w = edited_bgr.shape[:2]
+    warped = cv2.warpAffine(
+        rgba_roi, m_total, (w, h),
+        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+    )
+    alpha = warped[..., 3:4].astype(np.float64) / 255.0
+    fg = warped[..., :3].astype(np.float64) / 255.0
+    base = edited_bgr.astype(np.float64) / 255.0
+    return (np.clip(alpha * fg + (1.0 - alpha) * base, 0, 1) * 255).astype(np.uint8)
+
+
 def reconstruction_error(alpha: np.ndarray, fg_bgr: np.ndarray, roi_a: np.ndarray) -> float:
     """Mean abs error (0-255) inside alpha>0.05 when compositing back onto A itself."""
     recon = composite(alpha, fg_bgr, roi_a).astype(np.float32)

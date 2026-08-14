@@ -45,6 +45,10 @@
   <label>FG閾値 <input type="range" id="fgThresh" min="30" max="95" value="70"></label>
   <label>BG閾値 <input type="range" id="bgThresh" min="2" max="50" value="18"></label>
   <button id="btnMatte">Matting実行</button>
+  <span style="border-left:1px solid #555;height:24px"></span>
+  <label>編集済み画像: <input type="file" id="fileEdited" accept="image/*"></label>
+  <button id="btnRecompose">再合成</button>
+  <a id="btnDownload" download><button class="secondary">表示中レイヤーを保存</button></a>
 </div>
 <div id="status">画像をアップロードしてください。</div>
 
@@ -66,7 +70,8 @@ function setLayerOptions(layers) {
   const names = {
     roi_a: 'Original (装着)', roi_b: 'Aligned (未装着)', difference: 'Difference',
     probability: 'Probability', trimap: 'Trimap', alpha: 'Alpha',
-    product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成'
+    product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成',
+    composite_on_edited: '編集済み画像へ再合成'
   };
   const sel = document.getElementById('layerSelect');
   const current = sel.value;
@@ -82,6 +87,9 @@ function setLayerOptions(layers) {
 
 function showLayer(name) {
   state.layer = name;
+  const dl = document.getElementById('btnDownload');
+  dl.href = `/api/image/${state.session}/${name}`;
+  dl.setAttribute('download', `${name}.png`);
   const img = new Image();
   img.onload = () => {
     baseCanvas.width = paintCanvas.width = state.w = img.width;
@@ -149,6 +157,25 @@ function paintAt(e) {
 paintCanvas.addEventListener('pointerdown', (e) => { if (state.brush) { state.painting = true; paintAt(e); } });
 paintCanvas.addEventListener('pointermove', (e) => { if (state.painting) paintAt(e); });
 window.addEventListener('pointerup', () => { if (state.painting) { state.painting = false; savePaint(); } });
+
+document.getElementById('btnRecompose').onclick = async () => {
+  if (!state.session) { status('先に画像をアップロードしてください'); return; }
+  const fe = document.getElementById('fileEdited').files[0];
+  if (!fe) { status('編集済み画像を選択してください'); return; }
+  status('再合成中…（顔検出・位置合わせ・Alpha合成）');
+  const fd = new FormData();
+  fd.append('session_id', state.session);
+  fd.append('edited_image', fe);
+  const res = await fetch('/api/recompose', { method: 'POST', body: fd });
+  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
+  const sel = document.getElementById('layerSelect');
+  const layers = [...sel.options].map(o => o.value);
+  if (!layers.includes('composite_on_edited')) layers.push('composite_on_edited');
+  setLayerOptions(layers);
+  sel.value = 'composite_on_edited';
+  showLayer('composite_on_edited');
+  status('再合成完了。「表示中レイヤーを保存」でダウンロードできます。');
+};
 
 document.getElementById('btnMatte').onclick = async () => {
   if (!state.session) { status('先に画像をアップロードしてください'); return; }
