@@ -2,6 +2,7 @@
 
 設計書 v2 §20–24 / §36 Phase 4–6 に対応する検討メモ。
 対象は「顔をほぼ動かさず、まばたきのみする動画」という具体的なユースケース。
+表情変化が大きい動画への拡張は [video-expression-matting.md](video-expression-matting.md) を参照。
 
 ## 検討した案: 毎フレーム差分
 
