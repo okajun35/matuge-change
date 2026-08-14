@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-from backend import pipeline
+from backend import lash_extraction as pipeline
+from backend.lash_extraction import matting as matting_module
 
 
 class TestBuildTrimap:
@@ -128,7 +129,7 @@ class TestAlignBToA:
 
 class TestRecomposeOnto:
     def test_identity_mapping(self, synthetic_landmarks, monkeypatch):
-        monkeypatch.setattr(pipeline, "detect_landmarks", lambda _img: synthetic_landmarks)
+        monkeypatch.setattr(matting_module, "detect_landmarks", lambda _img: synthetic_landmarks)
         roi = pipeline.EyeRoi(0, 0, 400, 400, 1.0)
         rgba = np.zeros((400, 400, 4), np.uint8)
         rgba[100:120, 100:120] = (0, 0, 255, 255)  # opaque red square (BGR)
@@ -139,7 +140,7 @@ class TestRecomposeOnto:
         assert (out[300:320, 300:320] == 40).all()
 
     def test_roi_offset_and_scale(self, synthetic_landmarks, monkeypatch):
-        monkeypatch.setattr(pipeline, "detect_landmarks", lambda _img: synthetic_landmarks)
+        monkeypatch.setattr(matting_module, "detect_landmarks", lambda _img: synthetic_landmarks)
         # ROI crop at (50, 60) downscaled by 0.5: ROI pixel (25, 20) -> image (100, 100)
         roi = pipeline.EyeRoi(50, 60, 250, 260, 0.5)
         rgba = np.zeros((100, 100, 4), np.uint8)
@@ -151,7 +152,7 @@ class TestRecomposeOnto:
         assert (out[300:320, 300:320] == 0).all()
 
     def test_none_when_no_face(self, synthetic_landmarks, monkeypatch):
-        monkeypatch.setattr(pipeline, "detect_landmarks", lambda _img: None)
+        monkeypatch.setattr(matting_module, "detect_landmarks", lambda _img: None)
         roi = pipeline.EyeRoi(0, 0, 100, 100, 1.0)
         rgba = np.zeros((100, 100, 4), np.uint8)
         edited = np.zeros((200, 200, 3), np.uint8)

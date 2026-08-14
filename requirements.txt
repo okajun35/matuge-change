@@ -6,3 +6,4 @@ pillow
 mediapipe
 pymatting
 python-multipart
+supabase==2.31.0
