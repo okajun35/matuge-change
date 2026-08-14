@@ -36,6 +36,7 @@
   </label>
   <label>ブラシ:
     <button id="btnAdd" class="secondary">＋ 商品</button>
+    <button id="btnUnknown" class="secondary">？ 中間</button>
     <button id="btnRemove" class="secondary">− 背景</button>
     <button id="btnNone" class="secondary">オフ</button>
   </label>
@@ -133,13 +134,14 @@ document.getElementById('layerSelect').onchange = (e) => showLayer(e.target.valu
 
 function setBrush(mode, btn) {
   state.brush = mode;
-  for (const id of ['btnAdd', 'btnRemove', 'btnNone'])
+  for (const id of ['btnAdd', 'btnUnknown', 'btnRemove', 'btnNone'])
     document.getElementById(id).classList.remove('brush-active');
   if (btn) btn.classList.add('brush-active');
   paintCanvas.style.pointerEvents = mode ? 'auto' : 'none';
   paintCanvas.style.cursor = mode ? 'crosshair' : 'default';
 }
 document.getElementById('btnAdd').onclick = (e) => setBrush('add', e.target);
+document.getElementById('btnUnknown').onclick = (e) => setBrush('unknown', e.target);
 document.getElementById('btnRemove').onclick = (e) => setBrush('remove', e.target);
 document.getElementById('btnNone').onclick = () => setBrush(null, null);
 document.getElementById('btnClear').onclick = () => { pctx.clearRect(0, 0, state.w, state.h); savePaint(); };
@@ -150,7 +152,7 @@ function paintAt(e) {
   const x = e.clientX - rect.left, y = e.clientY - rect.top;
   const r = +document.getElementById('brushSize').value;
   pctx.globalAlpha = 0.55;
-  pctx.fillStyle = state.brush === 'add' ? '#ff2020' : '#2040ff';
+  pctx.fillStyle = { add: '#ff2020', unknown: '#20c040', remove: '#2040ff' }[state.brush];
   pctx.beginPath(); pctx.arc(x, y, r, 0, Math.PI * 2); pctx.fill();
   pctx.globalAlpha = 1;
 }

@@ -125,13 +125,17 @@ async def run_matte(
         cimg = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_UNCHANGED)
         if cimg is None or cimg.shape[:2] != prob.shape:
             raise HTTPException(400, "invalid constraints image")
-        # UI encodes: red = product (+1), blue = background (-1), on transparent canvas
+        # UI encodes on transparent canvas: red = product (+1),
+        # green = unknown (2), blue = background (-1)
         alpha_ch = cimg[..., 3] if cimg.shape[2] == 4 else np.full(prob.shape, 255, np.uint8)
         constraints = np.zeros(prob.shape, np.int8)
         painted = alpha_ch > 64
-        red = cimg[..., 2].astype(int) > cimg[..., 0].astype(int)
-        constraints[painted & red] = 1
-        constraints[painted & ~red] = -1
+        b = cimg[..., 0].astype(int)
+        g = cimg[..., 1].astype(int)
+        r = cimg[..., 2].astype(int)
+        constraints[painted & (r >= g) & (r >= b)] = 1
+        constraints[painted & (g > r) & (g >= b)] = 2
+        constraints[painted & (b > r) & (b > g)] = -1
 
     trimap = pipeline.build_trimap(prob, constraints, fg_thresh, bg_thresh, unknown_band_px)
     alpha, fg = pipeline.run_matting(roi_a, trimap)

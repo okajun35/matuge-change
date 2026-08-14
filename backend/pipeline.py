@@ -168,7 +168,7 @@ def build_trimap(
 ) -> np.ndarray:
     """Trimap uint8: 255 FG / 128 unknown / 0 BG.
 
-    constraints: int8 map, +1 user product, -1 user background, 0 none.
+    constraints: int8 map, +1 user product, 2 user unknown, -1 user background, 0 none.
     """
     fg = prob >= fg_thresh
     maybe = prob >= bg_thresh
@@ -180,8 +180,9 @@ def build_trimap(
     trimap[unknown] = 128
     trimap[fg] = 255
     if constraints is not None:
-        trimap[constraints > 0] = 255
-        trimap[constraints < 0] = 0
+        trimap[constraints == 2] = 128
+        trimap[constraints == 1] = 255
+        trimap[constraints == -1] = 0
     return trimap
 
 
