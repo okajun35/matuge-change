@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import tempfile
 import uuid
 
 import cv2
@@ -13,7 +14,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import pipeline
+from backend import pipeline, video
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(ROOT, "data")
@@ -178,6 +179,93 @@ async def recompose(
         raise HTTPException(422, "no face detected in the edited image")
     imwrite(os.path.join(sdir, "composite_on_edited.png"), out)
     return {"layers": ["composite_on_edited"]}
+
+
+@app.post("/api/video/session")
+async def create_video_session(video_file: UploadFile = File(..., alias="video")):
+    data = video_file.file.read()
+    with tempfile.NamedTemporaryFile(suffix=".mp4") as tmp:
+        tmp.write(data)
+        tmp.flush()
+        try:
+            frames, fps = video.read_video_frames(tmp.name)
+        except ValueError as e:
+            raise HTTPException(400, f"could not decode video: {video_file.filename}") from e
+
+    landmarks = [pipeline.detect_landmarks(f) for f in frames]
+    try:
+        best = video.select_best_frame(frames, landmarks)
+    except ValueError as e:
+        raise HTTPException(422, "no face detected in the video") from e
+
+    session_id = uuid.uuid4().hex[:12]
+    sdir = os.path.join(DATA_DIR, session_id)
+    fdir = os.path.join(sdir, "frames")
+    os.makedirs(fdir)
+    for i, frame in enumerate(frames):
+        imwrite(os.path.join(fdir, f"{i:06d}.png"), frame)
+    stacked = np.stack([lms if lms is not None else np.full((478, 2), np.nan) for lms in landmarks])
+    np.save(os.path.join(sdir, "video_landmarks.npy"), stacked)
+    imwrite(os.path.join(sdir, "best_frame.png"), frames[best])
+    h, w = frames[0].shape[:2]
+    with open(os.path.join(sdir, "meta.json"), "w") as f:
+        json.dump(
+            {
+                "type": "video",
+                "fps": fps,
+                "frame_count": len(frames),
+                "best_frame_index": best,
+                "width": w,
+                "height": h,
+            },
+            f,
+        )
+
+    return {
+        "session_id": session_id,
+        "frame_count": len(frames),
+        "fps": fps,
+        "best_frame_index": best,
+        "width": w,
+        "height": h,
+        "layers": ["best_frame"],
+    }
+
+
+@app.post("/api/video/compose")
+async def compose_video(
+    session_id: str = Form(...),
+    edited_image: UploadFile = File(...),
+    expand: float = Form(0.45),
+):
+    sdir = session_dir(session_id)
+    with open(os.path.join(sdir, "meta.json")) as f:
+        meta = json.load(f)
+    if meta.get("type") != "video":
+        raise HTTPException(409, "not a video session")
+
+    edited = read_upload(edited_image)
+    lms_edited = pipeline.detect_landmarks(edited)
+    if lms_edited is None:
+        raise HTTPException(422, "no face detected in the edited image")
+
+    fdir = os.path.join(sdir, "frames")
+    stacked = np.load(os.path.join(sdir, "video_landmarks.npy"))
+    frames = [cv2.imread(os.path.join(fdir, f"{i:06d}.png")) for i in range(meta["frame_count"])]
+    landmarks: list[np.ndarray | None] = [None if np.isnan(lms).any() else lms for lms in stacked]
+    outs = video.compose_frames(frames, landmarks, edited, lms_edited, expand)
+    video.write_video(outs, meta["fps"], os.path.join(sdir, "output.mp4"))
+    return {"video": "output", "frame_count": len(outs)}
+
+
+@app.get("/api/video/{session_id}/{name}")
+async def get_video(session_id: str, name: str):
+    if not name.replace("_", "").isalnum():
+        raise HTTPException(400, "bad video name")
+    path = os.path.join(session_dir(session_id), f"{name}.mp4")
+    if not os.path.exists(path):
+        raise HTTPException(404, "video not found")
+    return FileResponse(path, media_type="video/mp4")
 
 
 @app.get("/api/image/{session_id}/{name}")
