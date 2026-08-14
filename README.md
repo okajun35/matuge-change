@@ -25,6 +25,13 @@ curl -sL -o models/face_landmarker.task --create-dirs \
   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 ```
 
+## テスト
+
+```bash
+uv pip install -r requirements-dev.txt
+python -m pytest tests/ -q
+```
+
 ## 起動
 
 ```bash
