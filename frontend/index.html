@@ -193,7 +193,10 @@ document.getElementById('btnMatte').onclick = async () => {
     const data = await res.json();
     const base = ['roi_a'];
     if (document.getElementById('fileWithout').files[0]) base.push('roi_b');
-    setLayerOptions([...base, 'difference', 'probability', ...data.layers]);
+    const layers = [...base, 'difference', 'probability', ...data.layers];
+    const prev = [...document.getElementById('layerSelect').options].map(o => o.value);
+    if (prev.includes('composite_on_edited')) layers.push('composite_on_edited');
+    setLayerOptions(layers);
     status(`Matting 完了。再合成誤差 (mean abs, 0-255): ${data.reconstruction_error.toFixed(2)}`);
   } finally {
     document.getElementById('btnMatte').disabled = false;
