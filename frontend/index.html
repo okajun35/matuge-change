@@ -18,7 +18,7 @@
   #baseCanvas { position: relative; }
   #status { padding: 6px 16px; font-size: 13px; color: #9fd; min-height: 20px; }
   .brush-active { outline: 2px solid #ff5; }
-  #checker { background: repeating-conic-gradient(#666 0% 25%, #999 0% 50%) 0 / 16px 16px; }
+  .checker { background: repeating-conic-gradient(#666 0% 25%, #999 0% 50%) 0 / 16px 16px; }
 </style>
 </head>
 <body>
@@ -57,6 +57,7 @@
 const state = { session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a' };
 const baseCanvas = document.getElementById('baseCanvas');
 const paintCanvas = document.getElementById('paintCanvas');
+const stage = document.getElementById('stage');
 const bctx = baseCanvas.getContext('2d');
 const pctx = paintCanvas.getContext('2d');
 const status = (msg) => document.getElementById('status').textContent = msg;
@@ -85,9 +86,9 @@ function showLayer(name) {
   img.onload = () => {
     baseCanvas.width = paintCanvas.width = state.w = img.width;
     baseCanvas.height = paintCanvas.height = state.h = img.height;
-    document.getElementById('stage').style.height = img.height + 'px';
-    document.getElementById('stage').style.width = img.width + 'px';
-    baseCanvas.parentElement.id = name === 'product_rgba' ? 'checker' : 'stage';
+    stage.style.height = img.height + 'px';
+    stage.style.width = img.width + 'px';
+    stage.classList.toggle('checker', name === 'product_rgba');
     bctx.clearRect(0, 0, img.width, img.height);
     bctx.drawImage(img, 0, 0);
     restorePaint();
