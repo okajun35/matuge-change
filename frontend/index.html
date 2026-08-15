@@ -2,497 +2,36 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>matuge-change PoC — まつ毛Alpha抽出</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 0; background: #1e1e24; color: #eee; }
-  header { padding: 10px 16px; background: #2a2a33; }
-  header h1 { font-size: 16px; margin: 0; }
-  #controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: #26262e; }
-  #controls label { font-size: 13px; }
-  button { background: #4a6cf7; color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  button.secondary { background: #555; }
-  button:disabled { opacity: .4; cursor: default; }
-  select, input[type=range] { vertical-align: middle; }
-  #stage { position: relative; margin: 12px auto; overflow: auto; max-width: 98vw; }
-  canvas { position: absolute; left: 0; top: 0; image-rendering: auto; }
-  #baseCanvas { position: relative; }
-  #status { padding: 6px 16px; font-size: 13px; color: #9fd; min-height: 20px; }
-  .brush-active { outline: 2px solid #ff5; }
-  .checker { background: repeating-conic-gradient(#666 0% 25%, #999 0% 50%) 0 / 16px 16px; }
-  #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; width: 220px; }
-  #progressBar { height: 100%; width: 0; background: #4a6cf7; transition: width .2s; }
-  #catalog { padding: 10px 16px; background: #26262e; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  #catalog input[type=text] { background: #1e1e24; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px; }
-  #assetList { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
-  #catalogPanel { background: #26262e; }
-  #catalogPanel > summary { cursor: pointer; padding: 8px 16px; font-size: 13px; color: #cfd; list-style: none; }
-  #catalogPanel > summary::before { content: '\25B8 '; }
-  #catalogPanel[open] > summary::before { content: '\25BE '; }
-  #assetPager { display: flex; gap: 8px; align-items: center; padding: 0 16px 12px; font-size: 13px; color: #9ab; }
-  .asset { background: #2a2a33; border-radius: 6px; padding: 6px; width: 132px; font-size: 12px; }
-  .asset img { width: 120px; height: 60px; object-fit: contain; display: block; }
-  #tabs { display: flex; gap: 4px; padding: 8px 16px 0; background: #2a2a33; }
-  #tabs button { background: #3a3a45; border-radius: 8px 8px 0 0; }
-  #tabs button.tab-active { background: #4a6cf7; }
-  #videoControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: #26262e; }
-  #videoStage { padding: 12px 16px; }
-  #videoStage img, #videoStage video { max-width: 96vw; max-height: 70vh; display: block; margin-top: 8px; }
-</style>
+<title>matuge-change PoC — 商品カタログ</title>
+<link rel="stylesheet" href="/common.css">
 </head>
 <body>
-<header><h1>matuge-change PoC — まつ毛 Alpha 抽出（商品＋自まつ毛）</h1></header>
+<header><h1>matuge-change PoC — 商品カタログ</h1></header>
 
-<div id="tabs">
-  <button id="tabStill" class="tab-active">静止画モード</button>
-  <button id="tabVideo">動画モード</button>
+<nav>
+  <a href="/" class="nav-active">カタログ</a>
+  <a href="/extract.html">静止画モード</a>
+  <a href="/video.html">動画モード</a>
+</nav>
+
+<div class="bar">
+  <label>検索 <input type="text" id="assetQuery" placeholder="商品名 / ブランド"></label>
+  <button id="btnRefreshAssets" class="secondary">カタログ更新</button>
+  <a href="/extract.html"><button>商品を抽出して登録する</button></a>
+  <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
 </div>
 
-<div id="controls">
-  <label>装着画像: <input type="file" id="fileWith" accept="image/*"></label>
-  <label>未装着画像(任意): <input type="file" id="fileWithout" accept="image/*"></label>
-  <button id="btnUpload">解析開始</button>
-  <label>セッションID <input type="text" id="sessionId" size="12" placeholder="作業を再開"></label>
-  <button id="btnResume" class="secondary">再開</button>
-  <span style="border-left:1px solid #555;height:24px"></span>
-  <label>表示:
-    <select id="layerSelect">
-      <option value="roi_a">Original (装着)</option>
-    </select>
-  </label>
-  <label>ブラシ:
-    <button id="btnAdd" class="secondary">＋ 商品</button>
-    <button id="btnUnknown" class="secondary">？ 中間</button>
-    <button id="btnRemove" class="secondary">− 背景</button>
-    <button id="btnNone" class="secondary">オフ</button>
-  </label>
-  <label>サイズ <input type="range" id="brushSize" min="2" max="60" value="14"></label>
-  <button id="btnUndo" class="secondary" disabled>↶ 元に戻す</button>
-  <button id="btnRedo" class="secondary" disabled>↷ やり直す</button>
-  <button id="btnClear" class="secondary">ブラシ消去</button>
-  <span style="border-left:1px solid #555;height:24px"></span>
-  <label>FG閾値 <input type="range" id="fgThresh" min="30" max="95" value="70"></label>
-  <label>BG閾値 <input type="range" id="bgThresh" min="2" max="50" value="18"></label>
-  <button id="btnMatte">Matting実行</button>
-  <span style="border-left:1px solid #555;height:24px"></span>
-  <label>編集済み画像: <input type="file" id="fileEdited" accept="image/*"></label>
-  <button id="btnRecompose">再合成</button>
-  <a id="btnDownload" download><button class="secondary">表示中レイヤーを保存</button></a>
-  <div id="progress"><div id="progressBar"></div></div>
-</div>
-
-<details id="catalogPanel">
-  <summary>商品カタログ <span id="catalogCount"></span></summary>
-  <div id="catalog">
-    <label>商品名 <input type="text" id="assetName" placeholder="ボリュームラッシュ D 0.07"></label>
-    <label>ブランド <input type="text" id="assetBrand" placeholder="任意"></label>
-    <button id="btnRegister">この抽出結果を商品として登録</button>
-    <span style="border-left:1px solid #555;height:24px"></span>
-    <label>検索 <input type="text" id="assetQuery" placeholder="商品名 / ブランド"></label>
-    <button id="btnRefreshAssets" class="secondary">カタログ更新</button>
-    <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
-  </div>
-  <div id="assetList"></div>
-  <div id="assetPager">
-    <button id="btnPrevPage" class="secondary">‹ 前へ</button>
-    <span id="pageInfo"></span>
-    <button id="btnNextPage" class="secondary">次へ ›</button>
-  </div>
-</details>
-<div id="status">画像をアップロードしてください。</div>
-
-<div id="stage">
-  <canvas id="baseCanvas"></canvas>
-  <canvas id="paintCanvas"></canvas>
-</div>
-
-<div id="videoMode" style="display:none">
-  <div id="videoControls">
-    <label>動画: <input type="file" id="fileVideo" accept="video/*"></label>
-    <button id="btnVideoUpload">解析開始（ベストフレーム選択）</button>
-    <a id="btnBestFrame" download="best_frame.png" style="display:none"><button class="secondary">ベストフレームを保存</button></a>
-    <span style="border-left:1px solid #555;height:24px"></span>
-    <label>AI加工済み画像: <input type="file" id="fileVideoEdited" accept="image/*"></label>
-    <label>目元領域の広さ <input type="range" id="expandRange" min="15" max="90" value="45"></label>
-    <button id="btnCompose">動画合成</button>
-    <a id="btnVideoDownload" download="output.mp4" style="display:none"><button class="secondary">合成動画を保存</button></a>
-  </div>
-  <div id="videoStatus" style="padding:6px 16px;font-size:13px;color:#9fd;min-height:20px">動画をアップロードしてください。ベストフレームを保存→外部でAI加工（目元は変えない指示推奨）→加工済み画像を選んで「動画合成」。</div>
-  <div id="videoStage">
-    <img id="bestFrameImg" style="display:none" alt="best frame">
-    <video id="outputVideo" controls loop style="display:none"></video>
-  </div>
+<div class="status" id="status">カードをクリックすると形状の近い商品を表示します。</div>
+<div id="assetList"></div>
+<div id="assetPager">
+  <button id="btnPrevPage" class="secondary">‹ 前へ</button>
+  <span id="pageInfo"></span>
+  <button id="btnNextPage" class="secondary">次へ ›</button>
 </div>
 
 <script>
-const state = {
-  session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
-  strokes: [], current: null, supabase: null, channel: null, videoSession: null,
-};
-const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
-const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
-
-function setMode(mode) {
-  const still = mode === 'still';
-  document.getElementById('tabStill').classList.toggle('tab-active', still);
-  document.getElementById('tabVideo').classList.toggle('tab-active', !still);
-  for (const id of ['controls', 'catalogPanel', 'status', 'stage'])
-    document.getElementById(id).style.display = still ? '' : 'none';
-  document.getElementById('videoMode').style.display = still ? 'none' : '';
-}
-document.getElementById('tabStill').onclick = () => setMode('still');
-document.getElementById('tabVideo').onclick = () => setMode('video');
-
-const vstatus = (msg) => document.getElementById('videoStatus').textContent = msg;
-
-document.getElementById('btnVideoUpload').onclick = async () => {
-  const fv = document.getElementById('fileVideo').files[0];
-  if (!fv) { vstatus('動画を選択してください'); return; }
-  const fd = new FormData();
-  fd.append('video', fv);
-  vstatus('解析中…（フレーム分解・全フレームの顔検出・ベストフレーム選択。動画長に応じて時間がかかります）');
-  document.getElementById('btnVideoUpload').disabled = true;
-  try {
-    const res = await fetch('/api/video/session', { method: 'POST', body: fd });
-    if (!res.ok) { vstatus('エラー: ' + (await res.text())); return; }
-    const data = await res.json();
-    state.videoSession = data.session_id;
-    const img = document.getElementById('bestFrameImg');
-    img.src = `/api/image/${data.session_id}/best_frame?t=${Date.now()}`;
-    img.style.display = '';
-    document.getElementById('outputVideo').style.display = 'none';
-    document.getElementById('btnVideoDownload').style.display = 'none';
-    const bf = document.getElementById('btnBestFrame');
-    bf.href = `/api/image/${data.session_id}/best_frame`;
-    bf.style.display = '';
-    vstatus(`解析完了: ${data.frame_count}フレーム / ${data.fps.toFixed(1)}fps、ベストフレーム #${data.best_frame_index}。この画像を保存してAI加工し、加工済み画像を選んで「動画合成」を押してください。`);
-  } finally {
-    document.getElementById('btnVideoUpload').disabled = false;
-  }
-};
-
-document.getElementById('btnCompose').onclick = async () => {
-  if (!state.videoSession) { vstatus('先に動画を解析してください'); return; }
-  const fe = document.getElementById('fileVideoEdited').files[0];
-  if (!fe) { vstatus('AI加工済み画像を選択してください'); return; }
-  const fd = new FormData();
-  fd.append('session_id', state.videoSession);
-  fd.append('edited_image', fe);
-  fd.append('expand', (+document.getElementById('expandRange').value / 100).toString());
-  vstatus('合成中…（全フレームへ目元領域を合成して動画を再生成しています）');
-  document.getElementById('btnCompose').disabled = true;
-  try {
-    const res = await fetch('/api/video/compose', { method: 'POST', body: fd });
-    if (!res.ok) { vstatus('エラー: ' + (await res.text())); return; }
-    const data = await res.json();
-    const url = `/api/video/${state.videoSession}/output?t=${Date.now()}`;
-    const vid = document.getElementById('outputVideo');
-    vid.src = url;
-    vid.style.display = '';
-    document.getElementById('bestFrameImg').style.display = 'none';
-    const dl = document.getElementById('btnVideoDownload');
-    dl.href = `/api/video/${state.videoSession}/output`;
-    dl.style.display = '';
-    vstatus(`合成完了（${data.frame_count}フレーム）。目元に違和感がある場合は「目元領域の広さ」を調整して再合成してください。`);
-  } finally {
-    document.getElementById('btnCompose').disabled = false;
-  }
-};
-
-const baseCanvas = document.getElementById('baseCanvas');
-const paintCanvas = document.getElementById('paintCanvas');
-const stage = document.getElementById('stage');
-const bctx = baseCanvas.getContext('2d');
-const pctx = paintCanvas.getContext('2d');
-const status = (msg) => document.getElementById('status').textContent = msg;
-
-function setLayerOptions(layers) {
-  const names = {
-    roi_a: 'Original (装着)', roi_b: 'Aligned (未装着)', difference: 'Difference',
-    probability: 'Probability', trimap: 'Trimap', alpha: 'Alpha',
-    product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成',
-    composite_on_edited: '編集済み画像へ再合成',
-    source_with: '元画像 (装着)', source_without: '元画像 (未装着)',
-    source_edited: '元画像 (AI加工済み)'
-  };
-  const sel = document.getElementById('layerSelect');
-  const current = sel.value;
-  sel.innerHTML = '';
-  for (const l of layers) {
-    const opt = document.createElement('option');
-    opt.value = l; opt.textContent = names[l] || l;
-    sel.appendChild(opt);
-  }
-  sel.value = layers.includes(current) ? current : layers[layers.length - 1];
-  showLayer(sel.value);
-}
-
-function showLayer(name) {
-  state.layer = name;
-  const dl = document.getElementById('btnDownload');
-  dl.href = `/api/image/${state.session}/${name}`;
-  dl.setAttribute('download', `${name}.png`);
-  const img = new Image();
-  img.onload = () => {
-    baseCanvas.width = paintCanvas.width = state.w = img.width;
-    baseCanvas.height = paintCanvas.height = state.h = img.height;
-    stage.style.height = img.height + 'px';
-    stage.style.width = img.width + 'px';
-    stage.classList.toggle('checker', name === 'product_rgba');
-    bctx.clearRect(0, 0, img.width, img.height);
-    bctx.drawImage(img, 0, 0);
-    restorePaint();
-  };
-  img.src = `/api/image/${state.session}/${name}?t=${Date.now()}`;
-}
-
-let paintBackup = null;
-const undoStack = [], redoStack = [];
-const MAX_HISTORY = 30;
-function restorePaint() {
-  if (paintBackup) pctx.putImageData(paintBackup, 0, 0);
-}
-function updateHistoryButtons() {
-  document.getElementById('btnUndo').disabled = !undoStack.length;
-  document.getElementById('btnRedo').disabled = !redoStack.length;
-}
-function resetHistory() {
-  undoStack.length = 0; redoStack.length = 0;
-  updateHistoryButtons();
-}
-function savePaint() {
-  undoStack.push(paintBackup);
-  if (undoStack.length > MAX_HISTORY) undoStack.shift();
-  redoStack.length = 0;
-  paintBackup = pctx.getImageData(0, 0, state.w, state.h);
-  updateHistoryButtons();
-}
-function applyPaint(snap) {
-  paintBackup = snap;
-  pctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-  restorePaint();
-  updateHistoryButtons();
-}
-function undoPaint() {
-  if (!undoStack.length) return;
-  redoStack.push(paintBackup);
-  applyPaint(undoStack.pop());
-}
-function redoPaint() {
-  if (!redoStack.length) return;
-  undoStack.push(paintBackup);
-  applyPaint(redoStack.pop());
-}
-document.getElementById('btnUndo').onclick = undoPaint;
-document.getElementById('btnRedo').onclick = redoPaint;
-window.addEventListener('keydown', (e) => {
-  if (!(e.ctrlKey || e.metaKey)) return;
-  const k = e.key.toLowerCase();
-  if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoPaint(); }
-  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoPaint(); }
-});
-
-document.getElementById('btnUpload').onclick = async () => {
-  const fw = document.getElementById('fileWith').files[0];
-  if (!fw) { status('装着画像を選択してください'); return; }
-  const fd = new FormData();
-  fd.append('image_with', fw);
-  const fo = document.getElementById('fileWithout').files[0];
-  if (fo) fd.append('image_without', fo);
-  status('解析中…（顔検出・位置合わせ・差分計算）');
-  const res = await fetch('/api/session', { method: 'POST', body: fd });
-  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
-  const data = await res.json();
-  state.session = data.session_id;
-  state.w = data.width; state.h = data.height;
-  state.strokes = [];
-  paintBackup = null;
-  resetHistory();
-  pctx.clearRect(0, 0, 4096, 4096);
-  setLayerOptions(data.layers);
-  document.getElementById('sessionId').value = data.session_id;
-  status(`解析完了 (session ${data.session_id})。Probability を確認し、必要ならブラシで補正して Matting を実行してください。`);
-};
-
-document.getElementById('layerSelect').onchange = (e) => showLayer(e.target.value);
-
-document.getElementById('btnResume').onclick = async () => {
-  const sid = document.getElementById('sessionId').value.trim();
-  if (!sid) { status('セッションID を入力してください'); return; }
-  const res = await fetch(`/api/sessions/${sid}`);
-  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
-  const data = await res.json();
-  state.session = sid;
-  state.w = data.width; state.h = data.height;
-  paintBackup = null;
-  resetHistory();
-  setLayerOptions(data.layers);
-  await loadStrokes(sid);
-  restorePaint();
-  status(`セッション ${sid} を復元しました（ブラシストローク ${state.strokes.length} 本）。`);
-};
-
-function setBrush(mode, btn) {
-  state.brush = mode;
-  for (const id of ['btnAdd', 'btnUnknown', 'btnRemove', 'btnNone'])
-    document.getElementById(id).classList.remove('brush-active');
-  if (btn) btn.classList.add('brush-active');
-  paintCanvas.style.pointerEvents = mode ? 'auto' : 'none';
-  paintCanvas.style.cursor = mode ? 'crosshair' : 'default';
-}
-document.getElementById('btnAdd').onclick = (e) => setBrush('add', e.target);
-document.getElementById('btnUnknown').onclick = (e) => setBrush('unknown', e.target);
-document.getElementById('btnRemove').onclick = (e) => setBrush('remove', e.target);
-document.getElementById('btnNone').onclick = () => setBrush(null, null);
-document.getElementById('btnClear').onclick = () => {
-  pctx.clearRect(0, 0, state.w, state.h);
-  state.strokes = [];
-  savePaint();
-  persistStrokes();
-};
-updateHistoryButtons();
-setBrush(null, null);
-
-function dab(tool, x, y, r) {
-  pctx.globalAlpha = 0.55;
-  pctx.fillStyle = COLOR_OF[tool];
-  pctx.beginPath(); pctx.arc(x, y, r, 0, Math.PI * 2); pctx.fill();
-  pctx.globalAlpha = 1;
-}
-
-function paintAt(e) {
-  const rect = paintCanvas.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
-  const r = +document.getElementById('brushSize').value;
-  dab(TOOL_OF[state.brush], x, y, r);
-  if (state.current) state.current.points.push([Math.round(x), Math.round(y)]);
-}
-
-function replayStrokes(strokes) {
-  pctx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
-  for (const s of strokes) for (const [x, y] of s.points) dab(s.tool, x, y, s.radius);
-  paintBackup = pctx.getImageData(0, 0, state.w, state.h);
-}
-
-async function persistStrokes() {
-  if (!state.session) return;
-  const body = { width: state.w, height: state.h, strokes: state.strokes };
-  await fetch(`/api/sessions/${state.session}/strokes`, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
-}
-
-async function loadStrokes(sessionId) {
-  const res = await fetch(`/api/sessions/${sessionId}/strokes`);
-  if (!res.ok) return;
-  const data = await res.json();
-  state.strokes = data.strokes;
-  if (state.strokes.length) replayStrokes(state.strokes);
-}
-
-paintCanvas.addEventListener('pointerdown', (e) => {
-  if (!state.brush) return;
-  state.painting = true;
-  state.current = {
-    tool: TOOL_OF[state.brush], radius: +document.getElementById('brushSize').value, points: [],
-  };
-  paintAt(e);
-});
-paintCanvas.addEventListener('pointermove', (e) => { if (state.painting) paintAt(e); });
-window.addEventListener('pointerup', () => {
-  if (!state.painting) return;
-  state.painting = false;
-  if (state.current && state.current.points.length) state.strokes.push(state.current);
-  state.current = null;
-  savePaint();
-  persistStrokes();
-});
-
-document.getElementById('btnRecompose').onclick = async () => {
-  if (!state.session) { status('先に画像をアップロードしてください'); return; }
-  const fe = document.getElementById('fileEdited').files[0];
-  if (!fe) { status('編集済み画像を選択してください'); return; }
-  status('再合成中…（顔検出・位置合わせ・Alpha合成）');
-  const fd = new FormData();
-  fd.append('session_id', state.session);
-  fd.append('edited_image', fe);
-  const res = await fetch('/api/recompose', { method: 'POST', body: fd });
-  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
-  const sel = document.getElementById('layerSelect');
-  const layers = [...sel.options].map(o => o.value);
-  if (!layers.includes('composite_on_edited')) layers.push('composite_on_edited');
-  setLayerOptions(layers);
-  sel.value = 'composite_on_edited';
-  showLayer('composite_on_edited');
-  status('再合成完了。「表示中レイヤーを保存」でダウンロードできます。');
-};
-
-const setProgress = (pct) => document.getElementById('progressBar').style.width = `${pct}%`;
-
-async function connectRealtime() {
-  const cfg = (await (await fetch('/api/config')).json()).supabase;
-  if (!cfg.realtime) return null;
-  const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm');
-  return createClient(cfg.url, cfg.publishable_key);
-}
-
-function onJobUpdate(job, resolve) {
-  setProgress(job.progress);
-  if (job.status === 'running') status(`Matting 実行中… ${job.stage || ''} ${job.progress}%`);
-  if (job.status === 'done' || job.status === 'failed') resolve(job);
-}
-
-function followWithRealtime(jobId) {
-  return new Promise((resolve) => {
-    state.channel = state.supabase
-      .channel(`matte_job_${jobId}`)
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'matte_jobs', filter: `id=eq.${jobId}` },
-        (payload) => onJobUpdate(payload.new, resolve))
-      .subscribe();
-  }).finally(() => { state.supabase.removeChannel(state.channel); state.channel = null; });
-}
-
-async function followWithPolling(jobId) {
-  for (;;) {
-    const job = await (await fetch(`/api/matte/jobs/${jobId}`)).json();
-    let finished = null;
-    onJobUpdate(job, (j) => { finished = j; });
-    if (finished) return finished;
-    await new Promise((r) => setTimeout(r, 400));
-  }
-}
-
-document.getElementById('btnMatte').onclick = async () => {
-  if (!state.session) { status('先に画像をアップロードしてください'); return; }
-  status('Matting をキューに投入中…');
-  setProgress(0);
-  document.getElementById('btnMatte').disabled = true;
-  const fd = new FormData();
-  fd.append('session_id', state.session);
-  fd.append('fg_thresh', (+document.getElementById('fgThresh').value / 100).toString());
-  fd.append('bg_thresh', (+document.getElementById('bgThresh').value / 100).toString());
-  const blank = !paintBackup || paintBackup.data.every((v, i) => (i % 4 !== 3) || v === 0);
-  if (!blank) fd.append('constraints_png', paintCanvas.toDataURL('image/png'));
-  try {
-    const res = await fetch('/api/matte/jobs', { method: 'POST', body: fd });
-    if (!res.ok) { status('エラー: ' + (await res.text())); return; }
-    const { job_id: jobId } = await res.json();
-    const job = state.supabase ? await followWithRealtime(jobId) : await followWithPolling(jobId);
-    if (job.status === 'failed') { status('Matting 失敗: ' + job.error); return; }
-    const base = ['roi_a'];
-    if (document.getElementById('fileWithout').files[0]) base.push('roi_b');
-    const layers = [...base, 'difference', 'probability', ...job.result.layers];
-    const prev = [...document.getElementById('layerSelect').options].map(o => o.value);
-    if (prev.includes('composite_on_edited')) layers.push('composite_on_edited');
-    setLayerOptions(layers);
-    status(`Matting 完了。再合成誤差 (mean abs, 0-255): ${job.result.reconstruction_error.toFixed(2)}`);
-  } finally {
-    document.getElementById('btnMatte').disabled = false;
-    setProgress(0);
-  }
-};
-
 const catalogInfo = (msg) => document.getElementById('catalogInfo').textContent = msg;
+const status = (msg) => document.getElementById('status').textContent = msg;
 
 const PAGE_SIZE = 12;
 const catalogPage = { offset: 0, query: '' };
@@ -521,29 +60,17 @@ async function refreshAssets() {
   document.getElementById('pageInfo').textContent = `${current} / ${pages} ページ（全 ${total} 件）`;
   document.getElementById('btnPrevPage').disabled = offset === 0;
   document.getElementById('btnNextPage').disabled = offset + PAGE_SIZE >= total;
-  document.getElementById('catalogCount').textContent = `(${total} 件)`;
-  catalogInfo('');
+  catalogInfo(`${total} 件`);
+  if (!total) status('登録済みの商品はまだありません。「静止画モード」でまつ毛を抽出して登録してください。');
 }
 
 async function showSimilar(assetId, name) {
   const { matches } = await (await fetch(`/api/assets/${assetId}/similar?limit=5`)).json();
-  if (!matches.length) { catalogInfo(`${name}: 類似商品はまだありません`); return; }
-  catalogInfo(`${name} に近い形状: ` +
+  if (!matches.length) { status(`${name}: 類似商品はまだありません`); return; }
+  status(`${name} に近い形状: ` +
     matches.map(m => `${m.name} (${(m.similarity * 100).toFixed(1)}%)`).join(' / '));
 }
 
-document.getElementById('btnRegister').onclick = async () => {
-  if (!state.session) { catalogInfo('先に Matting を実行してください'); return; }
-  const fd = new FormData();
-  fd.append('session_id', state.session);
-  fd.append('name', document.getElementById('assetName').value || `lash-${state.session}`);
-  const brand = document.getElementById('assetBrand').value;
-  if (brand) fd.append('brand', brand);
-  const res = await fetch('/api/assets', { method: 'POST', body: fd });
-  if (!res.ok) { catalogInfo('登録エラー: ' + (await res.text())); return; }
-  await refreshAssets();
-  catalogInfo('商品として登録しました');
-};
 document.getElementById('btnRefreshAssets').onclick = () => { catalogPage.offset = 0; refreshAssets(); };
 document.getElementById('btnPrevPage').onclick = () => {
   catalogPage.offset = Math.max(0, catalogPage.offset - PAGE_SIZE);
@@ -562,11 +89,7 @@ document.getElementById('assetQuery').oninput = (e) => {
     refreshAssets();
   }, 250);
 };
-
-(async () => {
-  state.supabase = await connectRealtime();
-  refreshAssets();
-})();
+refreshAssets();
 </script>
 </body>
 </html>
