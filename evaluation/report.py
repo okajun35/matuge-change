@@ -246,7 +246,10 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## Pixel mutation (product RGB under a transform)",
             "",
-            "`production_default` marks the interpolation the shipped recompose path uses.",
+            "`production_default` marks the interpolation the shipped recompose path uses."
+            " `fringe RGB MAE` is an **upper bound**: transparent pixels are filled with the"
+            " background colour here, whereas `estimate_foreground_ml` leaves something much"
+            " closer to the lash colour (docs/benchmark-findings.md §5.1).",
             "",
             _table(
                 [

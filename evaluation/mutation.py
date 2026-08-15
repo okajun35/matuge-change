@@ -133,9 +133,14 @@ def run_experiment(
     are separated instead of being lumped into one number.
 
     `fill_transparent` puts the background's own colour into fully transparent pixels,
-    because that is what `estimate_foreground_ml` leaves in the product RGBA. Without it
-    those pixels would be black and the experiment would understate how much colour a
-    non-premultiplied warp drags into the lash tips.
+    so that a non-premultiplied warp has something to drag into the lash tips (a rendered
+    product has black there, which would hide the effect entirely).
+
+    Treat the resulting `fringe_rgb_mae` as an **upper bound, not a prediction**. The real
+    `estimate_foreground_ml` does not leave skin colour there: measured on this pipeline it
+    leaves luminance ~86 while the skin is ~178 and the lash body ~60, so the actual colour
+    bleed is tiny (< 0.25/255 — see docs/benchmark-findings.md §5.1). Anything measured with
+    this flag says "how bad could it get", not "how bad it is".
     """
     variants = variants or VARIANTS
     height, width = background.shape
