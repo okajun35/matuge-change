@@ -30,6 +30,16 @@ class TestLocalPreview:
         assert "isLocalLayer" in page
 
 
+class TestRestoredStrokesArePainted:
+    def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):
+        page = _page()
+        # レイヤー画像の onload が paintCanvas をリサイズ（=内容クリア）するため、
+        # 表示完了を待たずにストロークを再生すると復元直後の筆跡が消える
+        assert "return new Promise" in page
+        assert "await setLayerOptions" in page
+        assert page.index("await setLayerOptions") < page.index("await loadStrokes")
+
+
 class TestSessionArchiveUi:
     def test_archive_buttons_call_the_archive_endpoints(self):
         page = _page()

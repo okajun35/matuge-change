@@ -136,7 +136,7 @@ function setLayerOptions(layers) {
   // 解析・Matting 後は結果を見せたいので、プレビュー表示中なら新しいサーバ側レイヤーへ切り替える
   const keep = current && all.includes(current) && !isLocalLayer(current);
   sel.value = keep ? current : (layers[layers.length - 1] || all[all.length - 1]);
-  showLayer(sel.value);
+  return showLayer(sel.value);
 }
 
 const isSourceLayer = (name) => name.startsWith('source_');
@@ -172,37 +172,44 @@ stage.addEventListener('wheel', (e) => {
   setZoom(state.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
 }, { passive: false });
 
+// 表示完了を待てるよう Promise を返す（ストローク再生はキャンバスのリサイズ後に行う必要がある）
 function showLayer(name) {
   state.layer = name;
   const local = isLocalLayer(name);
-  if (!local && !state.session) return;
+  if (!local && !state.session) return Promise.resolve(false);
   const src = local ? state.localUrls[name] : `/api/image/${state.session}/${name}?t=${Date.now()}`;
-  if (!src) return;
+  if (!src) return Promise.resolve(false);
   const dl = document.getElementById('btnDownload');
   dl.href = local ? state.localUrls[name] : `/api/image/${state.session}/${name}`;
   dl.setAttribute('download', `${name}.png`);
   const img = new Image();
-  img.onload = () => {
-    // 元画像は目元ROIと解像度が違うので、ブラシ用キャンバスのサイズ（=制約PNGのサイズ）は変えない
-    const viewOnly = isViewOnlyLayer(name);
-    baseCanvas.width = img.width;
-    baseCanvas.height = img.height;
-    if (!viewOnly) {
-      paintCanvas.width = state.w = img.width;
-      paintCanvas.height = state.h = img.height;
-    }
-    paintCanvas.style.display = viewOnly ? 'none' : 'block';
-    if (viewOnly) setBrush(null, null);
-    stage.classList.toggle('checker', name === 'product_rgba');
-    bctx.clearRect(0, 0, img.width, img.height);
-    bctx.drawImage(img, 0, 0);
-    // 全身の元画像は等倍だと画面に収まらないので、初期表示は全体が見えるズーム率にする
-    if (img.width > stage.clientWidth || img.height > stage.clientHeight) fitZoom();
-    else setZoom(1);
-    restorePaint();
-  };
-  img.onerror = () => status(`エラー: ${LAYER_NAMES[name] || name} を表示できませんでした`);
-  img.src = src;
+  return new Promise((resolve) => {
+    img.onload = () => {
+      // 元画像は目元ROIと解像度が違うので、ブラシ用キャンバスのサイズ（=制約PNGのサイズ）は変えない
+      const viewOnly = isViewOnlyLayer(name);
+      baseCanvas.width = img.width;
+      baseCanvas.height = img.height;
+      if (!viewOnly) {
+        paintCanvas.width = state.w = img.width;
+        paintCanvas.height = state.h = img.height;
+      }
+      paintCanvas.style.display = viewOnly ? 'none' : 'block';
+      if (viewOnly) setBrush(null, null);
+      stage.classList.toggle('checker', name === 'product_rgba');
+      bctx.clearRect(0, 0, img.width, img.height);
+      bctx.drawImage(img, 0, 0);
+      // 全身の元画像は等倍だと画面に収まらないので、初期表示は全体が見えるズーム率にする
+      if (img.width > stage.clientWidth || img.height > stage.clientHeight) fitZoom();
+      else setZoom(1);
+      restorePaint();
+      resolve(true);
+    };
+    img.onerror = () => {
+      status(`エラー: ${LAYER_NAMES[name] || name} を表示できませんでした`);
+      resolve(false);
+    };
+    img.src = src;
+  });
 }
 
 // 解析を待たずに選択画像を確認できるよう、ファイル選択時点でプレビュー用レイヤーを足す
@@ -305,7 +312,8 @@ async function resumeSession(sid) {
   state.w = data.width; state.h = data.height;
   paintBackup = null;
   resetHistory();
-  setLayerOptions(data.layers);
+  // ストロークの再生前に表示を待つ（onload が paintCanvas をリサイズして中身を消すため）
+  await setLayerOptions(data.layers);
   await loadStrokes(sid);
   restorePaint();
   status(`セッション ${sid} を復元しました（ブラシストローク ${state.strokes.length} 本）。`);
