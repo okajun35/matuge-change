@@ -71,9 +71,24 @@ class Case:
         return str(self.metadata.get("condition", "unknown"))
 
 
+MANIFEST = "manifest.json"
+
+
 def load_dataset(root: str) -> list[Case]:
+    """Load every case of a dataset.
+
+    If a `manifest.json` is present, only the cases it lists are loaded. Regenerating a
+    smaller dataset over an older one leaves the older case folders on disk, and without
+    the manifest they would be silently evaluated as part of the new run.
+    """
     if not os.path.isdir(root):
         raise FileNotFoundError(f"dataset directory not found: {root}")
+    listed: list[str] | None = None
+    manifest_path = os.path.join(root, MANIFEST)
+    if os.path.isfile(manifest_path):
+        with open(manifest_path, encoding="utf-8") as handle:
+            listed = list(json.load(handle).get("cases", []))
+
     cases: list[Case] = []
     for name in sorted(os.listdir(root)):
         directory = os.path.join(root, name)
@@ -82,7 +97,13 @@ def load_dataset(root: str) -> list[Case]:
             continue
         with open(meta_path, encoding="utf-8") as handle:
             metadata = json.load(handle)
-        cases.append(Case(case_id=metadata.get("id", name), directory=directory, metadata=metadata))
+        case_id = metadata.get("id", name)
+        if listed is not None and case_id not in listed:
+            continue
+        cases.append(Case(case_id=case_id, directory=directory, metadata=metadata))
     if not cases:
         raise FileNotFoundError(f"no cases with metadata.json under {root}")
+    if listed is not None and len(cases) != len(listed):
+        missing = sorted(set(listed) - {case.case_id for case in cases})
+        raise FileNotFoundError(f"{root}: manifest lists cases that are missing: {missing[:5]}")
     return cases

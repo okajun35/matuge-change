@@ -16,8 +16,10 @@ Two deliberate choices keep the resulting numbers honest:
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
+import random
 import zlib
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -46,6 +48,7 @@ class CaseSpec:
     product: str
     condition: str = "baseline"
     condition_value: Any = None
+    block: int = 0
     placement: Placement = field(default_factory=Placement)
     worn: Degradation = field(default_factory=Degradation)
     bare: Degradation = field(default_factory=Degradation)
@@ -62,6 +65,12 @@ class CaseSpec:
         key = f"{self.case_id}/{self.background}/{self.product}".encode()
         return zlib.crc32(key)
 
+    @property
+    def pair_key(self) -> str:
+        """Background + product. Every condition is compared against the baseline of
+        the same pair, so a score change cannot come from a different eye."""
+        return f"{self.background}|{self.product}"
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.case_id,
@@ -69,6 +78,8 @@ class CaseSpec:
             "product": self.product,
             "condition": self.condition,
             "condition_value": self.condition_value,
+            "pair_key": self.pair_key,
+            "block": int(self.block),
             "scale": float(self.placement.scale),
             "rotation_deg": float(self.placement.rotation_deg),
             "offset_x": float(self.placement.offset_x),
@@ -136,6 +147,27 @@ def build_case(background: EyeBackground, product: Product, spec: CaseSpec) -> G
     )
 
 
+MANIFEST = "manifest.json"
+
+
+def write_manifest(root: str, specs: list[CaseSpec], extra: dict[str, Any] | None = None) -> str:
+    """Record exactly which cases belong to this dataset.
+
+    Without it, regenerating a smaller dataset into an existing directory leaves the
+    older, larger set of case folders behind and the runner silently evaluates both.
+    """
+    path = os.path.join(root, MANIFEST)
+    payload = {
+        "cases": [spec.case_id for spec in specs],
+        "blocks": complete_blocks(specs),
+        "block_size": BLOCK_SIZE,
+        **(extra or {}),
+    }
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+    return path
+
+
 def write_case(root: str, case: GeneratedCase) -> str:
     directory = os.path.join(root, case.spec.case_id)
     os.makedirs(directory, exist_ok=True)
@@ -174,6 +206,10 @@ AXES: tuple[tuple[str, tuple[Any, ...]], ...] = (
     ("jpeg_quality", (60, 30)),
     ("bare_misalign_px", (1.5, 4.0)),
     ("shadow", (0.35,)),
+    # the bare shot differs from the worn shot in exposure/focus, not just in noise.
+    # This is the axis that actually stresses difference-based extraction.
+    ("exposure_mismatch", (0.9, 1.15)),
+    ("bare_blur_mismatch", (1.2,)),
     ("realistic", ("noise+jpeg+misalign+shadow",)),
 )
 
@@ -196,6 +232,11 @@ def _apply_axis(spec_kwargs: dict[str, Any], axis: str, value: Any) -> None:
         spec_kwargs["bare_misalign_deg"] = value / 4.0
     elif axis == "shadow":
         spec_kwargs["shadow"] = value
+    elif axis == "exposure_mismatch":
+        # only the bare shot changes: the two photos were taken under different light
+        spec_kwargs["bare"] = Degradation(brightness=value)
+    elif axis == "bare_blur_mismatch":
+        spec_kwargs["bare"] = Degradation(blur_sigma=value)
     elif axis == "realistic":
         spec_kwargs["worn"] = Degradation(noise_sigma=3.0, jpeg_quality=75)
         spec_kwargs["bare"] = Degradation(noise_sigma=3.0, jpeg_quality=75)
@@ -206,6 +247,14 @@ def _apply_axis(spec_kwargs: dict[str, Any], axis: str, value: Any) -> None:
         raise ValueError(f"unknown axis: {axis}")
 
 
+def variants_of(axes: tuple[tuple[str, tuple[Any, ...]], ...] = AXES) -> list[tuple[str, Any]]:
+    """The baseline plus every axis value, in a fixed order. One block of cases."""
+    return [("baseline", None)] + [(axis, value) for axis, values in axes for value in values]
+
+
+BLOCK_SIZE = len(variants_of())
+
+
 def plan_cases(
     backgrounds: list[str],
     products: list[str],
@@ -213,27 +262,47 @@ def plan_cases(
     seed: int = 0,
     axes: tuple[tuple[str, tuple[Any, ...]], ...] = AXES,
 ) -> list[CaseSpec]:
-    """Enumerate `count` case specs: baseline first, then one axis at a time."""
+    """Enumerate `count` case specs as *blocks*: one background+product pair per block,
+    holding the baseline and every axis value of that same pair.
+
+    Blocking is what makes the condition breakdown meaningful. Cycling conditions and
+    backgrounds independently would compare, say, the JPEG cases of one set of eyes
+    against the baseline of a different set, so the difference would partly measure the
+    eye rather than the condition.
+
+    `seed` permutes the order of the pairs, which decides who gets included when `count`
+    does not cover every pair.
+    """
     if not backgrounds or not products:
         raise ValueError("need at least one background and one product")
-    variants: list[tuple[str, Any]] = [("baseline", None)]
-    variants += [(axis, value) for axis, values in axes for value in values]
+    variants = variants_of(axes)
+    pairs = [(background, product) for product in products for background in backgrounds]
+    random.Random(seed).shuffle(pairs)
 
     specs: list[CaseSpec] = []
-    index = 0
-    while len(specs) < count:
-        axis, value = variants[index % len(variants)]
-        background = backgrounds[index % len(backgrounds)]
-        product = products[(index // max(1, len(backgrounds))) % len(products)]
-        kwargs: dict[str, Any] = {
-            "case_id": f"case_{len(specs) + 1:04d}",
-            "background": background,
-            "product": product,
-            "condition": axis,
-            "condition_value": value,
-        }
-        if axis != "baseline":
-            _apply_axis(kwargs, axis, value)
-        specs.append(CaseSpec(**kwargs))
-        index += 1
+    for block, (background, product) in enumerate(itertools.cycle(pairs)):
+        if len(specs) >= count:
+            break
+        for axis, value in variants:
+            if len(specs) >= count:
+                break
+            kwargs: dict[str, Any] = {
+                "case_id": f"case_{len(specs) + 1:04d}",
+                "background": background,
+                "product": product,
+                "condition": axis,
+                "condition_value": value,
+                "block": block,
+            }
+            if axis != "baseline":
+                _apply_axis(kwargs, axis, value)
+            specs.append(CaseSpec(**kwargs))
     return specs
+
+
+def complete_blocks(specs: list[CaseSpec]) -> int:
+    """How many pairs got every variant. Only these support a paired comparison."""
+    counted: dict[int, int] = {}
+    for spec in specs:
+        counted[spec.block] = counted.get(spec.block, 0) + 1
+    return sum(1 for total in counted.values() if total == BLOCK_SIZE)

@@ -40,7 +40,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--boundary-tolerance", type=int, default=2)
     parser.add_argument("--no-images", action="store_true", help="skip per-case PNG output")
     parser.add_argument("--no-mutation", action="store_true", help="skip the interpolation experiment")
+    parser.add_argument(
+        "--allow-failures",
+        action="store_true",
+        help="exit 0 even when some runs raised (default: exit 1 so CI notices)",
+    )
     return parser.parse_args(argv)
+
+
+def _provenance() -> dict[str, str]:
+    """Enough to tell whether a report still matches the code that produced it."""
+    import platform
+    import subprocess
+
+    import cv2
+    import numpy
+
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        commit = "unknown"
+    return {
+        "commit": commit,
+        "command": " ".join(sys.argv),
+        "python": platform.python_version(),
+        "numpy": numpy.__version__,
+        "opencv": cv2.__version__,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,6 +114,7 @@ def main(argv: list[str] | None = None) -> int:
             "binary_threshold": 0.5,
             "boundary_tolerance": config.boundary_tolerance,
             "wall_clock_seconds": round(time.perf_counter() - started, 1),
+            **_provenance(),
         },
     )
     report.write_report(args.output, rows, summary)
@@ -93,6 +122,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"wrote {args.output}/report.md, summary.json, summary.csv")
     for name, values in summary["overall"].items():
         print(f"  {name:>18}: Dice={values['dice']:.4f} IoU={values['iou']:.4f} MAD={values['mad']:.4f}")
+
+    failures = [row for row in rows if row.get("failed")]
+    if failures:
+        print(f"\n{len(failures)} of {len(rows)} runs raised, for example: {failures[0]['error']}")
+        if not args.allow_failures:
+            print("exiting non-zero (pass --allow-failures to ignore)", file=sys.stderr)
+            return 1
     return 0
 
 

@@ -189,10 +189,13 @@ def roi_downscale_experiment(
     image: np.ndarray,
     widths: tuple[int, ...] = (MAX_ROI_WIDTH, 800, 500, 300),
 ) -> list[dict[str, object]]:
-    """What `crop_roi`'s INTER_AREA shrink costs, per target ROI width.
+    """How far `crop_roi`'s INTER_AREA shrink moves pixels away from original values.
 
-    Compared against an INTER_NEAREST resize to the same size, which by definition
-    keeps original pixel values: any difference is interpolation, not scaling.
+    The reference is an INTER_NEAREST resize to the same size, which keeps original
+    pixel values by construction. **This is not a quality metric**: nearest is not the
+    correct answer for a downscale, it just never invents a colour. So the numbers say
+    "how many product pixels stop being original pixels", not "how much worse the image
+    looks" — INTER_AREA is the better-looking of the two.
     """
     height, width = image.shape[:2]
     rows: list[dict[str, object]] = []

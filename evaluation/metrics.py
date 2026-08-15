@@ -87,7 +87,12 @@ def matting_errors(
         "mad": _ratio(float(difference.sum()), count),
         "sad": float(difference.sum()),
         "mse": _ratio(float((difference**2).sum()), count),
+        # `grad` is a sum scaled by 1000, following the alpha-matting convention of a
+        # fixed-size benchmark. It therefore grows with image area: only compare it
+        # across runs of the same resolution. `grad_mean` is the per-pixel version and
+        # is the one to use when the image size can change.
         "grad": float(gradient.sum() / 1000.0),
+        "grad_mean": _ratio(float(gradient.sum()), count),
     }
 
 
@@ -156,14 +161,24 @@ def product_fidelity(
     composite to the same pixel), so only `alpha >= alpha_min` in *both* the prediction
     and the ground truth is compared.
     """
-    mask = (_as_alpha(pred_alpha) >= alpha_min) & (_as_alpha(gt_alpha) >= alpha_min)
+    truth_opaque = _as_alpha(gt_alpha) >= alpha_min
+    mask = (_as_alpha(pred_alpha) >= alpha_min) & truth_opaque
+    # how much of the product this error is actually based on: a prediction that keeps
+    # only a handful of opaque pixels would otherwise score a flattering RGB MAE
+    coverage = _ratio(float(np.count_nonzero(mask)), float(np.count_nonzero(truth_opaque)))
     if not mask.any():
-        return {"rgb_mae": float("nan"), "rgb_rmse": float("nan"), "fidelity_px": 0.0}
+        return {
+            "rgb_mae": float("nan"),
+            "rgb_rmse": float("nan"),
+            "fidelity_px": 0.0,
+            "opaque_coverage": coverage,
+        }
     difference = pred_rgb[mask].astype(np.float64) - gt_rgb[mask].astype(np.float64)
     return {
         "rgb_mae": float(np.abs(difference).mean()),
         "rgb_rmse": float(np.sqrt((difference**2).mean())),
         "fidelity_px": float(np.count_nonzero(mask)),
+        "opaque_coverage": coverage,
     }
 
 

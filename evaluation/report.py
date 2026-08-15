@@ -25,9 +25,11 @@ HEADLINE = (
     "precision_ex_own",
     "mad",
     "grad",
+    "grad_mean",
     "boundary_f1",
     "rgb_mae",
     "rgb_rmse",
+    "opaque_coverage",
     "recompose_mae",
     "reconstruction_error",
     "seconds",
@@ -42,9 +44,61 @@ def _mean(rows: Sequence[dict[str, Any]], key: str) -> float:
 
 def _summarise(rows: Sequence[dict[str, Any]], keys: Iterable[str] = HEADLINE) -> dict[str, float]:
     summary = {key: _mean(rows, key) for key in keys}
+    failed = sum(1 for row in rows if row.get("failed"))
     summary["runs"] = float(len(rows))
-    summary["failed"] = float(sum(1 for row in rows if row.get("failed")))
+    summary["failed"] = float(failed)
+    # the averages above skip NaN, so a run that crashed cannot drag them down. That is
+    # only honest next to the success rate: 1 success out of 100 would otherwise be
+    # reported as the score of a single lucky case.
+    summary["success_rate"] = _ratio(len(rows) - failed, len(rows))
     return summary
+
+
+def _ratio(numerator: float, denominator: float) -> float:
+    return float(numerator / denominator) if denominator else float("nan")
+
+
+def _paired_deltas(rows: Sequence[dict[str, Any]], key: str) -> dict[tuple[str, str], list[float]]:
+    """Score minus the baseline score of the *same* background+product pair.
+
+    A raw condition mean mixes in how hard each eye is; the paired delta does not.
+    """
+    baselines: dict[tuple[str, str], float] = {}
+    for row in rows:
+        if row.get("condition") == "baseline":
+            value = _value(row, key)
+            if value is not None:
+                baselines[(str(row.get("pair_key")), f"{row['mode']}/{row['brush']}")] = value
+    deltas: dict[tuple[str, str], list[float]] = {}
+    for row in rows:
+        if row.get("condition") == "baseline":
+            continue
+        base = baselines.get((str(row.get("pair_key")), f"{row['mode']}/{row['brush']}"))
+        value = _value(row, key)
+        if base is None or value is None:
+            continue
+        deltas.setdefault((str(row.get("condition")), str(row.get("condition_value"))), []).append(
+            value - base
+        )
+    return deltas
+
+
+def _value(row: dict[str, Any], key: str) -> float | None:
+    raw = row.get(key)
+    if not isinstance(raw, int | float) or np.isnan(float(raw)):
+        return None
+    return float(raw)
+
+
+def _condition_key(row: dict[str, Any]) -> str:
+    """`rotation_deg = 10.0`, not just `rotation_deg`.
+
+    Averaging -10, -5, +5 and +10 degrees into one row hides exactly the thing the
+    condition breakdown is supposed to show: where the score starts to fall.
+    """
+    condition = str(row.get("condition", "unknown"))
+    value = row.get("condition_value")
+    return condition if value in (None, "None", "") else f"{condition} = {value}"
 
 
 def _group(rows: Sequence[dict[str, Any]], key: str) -> dict[str, list[dict[str, Any]]]:
@@ -60,6 +114,7 @@ def summarise(
     roi_rows: Sequence[dict[str, Any]] = (),
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    rows = [{**row, "condition_key": _condition_key(row)} for row in rows]
     by_run: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         by_run.setdefault(f"{row['mode']}/{row['brush']}", []).append(row)
@@ -79,11 +134,14 @@ def summarise(
                 )
                 for run_name in sorted({f"{r['mode']}/{r['brush']}" for r in group})
             }
-            for name, group in _group(rows, "condition").items()
+            for name, group in _group(rows, "condition_key").items()
         },
-        "by_mode_condition": {
-            name: _summarise(group, ("dice", "iou", "precision", "recall", "mad", "grad"))
-            for name, group in _group(auto, "condition").items()
+        "paired_delta": {
+            f"{condition} = {value}": {
+                "dice_delta": float(np.mean(values)),
+                "pairs": len(values),
+            }
+            for (condition, value), values in sorted(_paired_deltas(auto, "dice").items())
         },
         "pixel_mutation": list(mutation_rows),
         "roi_downscale": list(roi_rows),
@@ -181,6 +239,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
                 "mode / brush",
                 "runs",
                 "failed",
+                "success",
                 "Dice",
                 "IoU",
                 "Precision",
@@ -194,6 +253,7 @@ def render_markdown(summary: dict[str, Any]) -> str:
                     name,
                     int(values["runs"]),
                     int(values["failed"]),
+                    values["success_rate"],
                     values["dice"],
                     values["iou"],
                     values["precision"],
@@ -208,13 +268,27 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "",
         "## Product fidelity and recomposition",
         "",
+        "`RGB MAE` only covers pixels opaque in both the prediction and the ground truth;"
+        " `opaque coverage` says how much of the product that is, so a high score on a"
+        " sliver cannot pass for fidelity. `recompose MAE` compares against the ground"
+        " truth product composited on the same base, not against `worn.png`.",
+        "",
         _table(
-            ["mode / brush", "RGB MAE", "RGB RMSE", "recompose MAE", "reconstruction err", "sec/run"],
+            [
+                "mode / brush",
+                "RGB MAE",
+                "RGB RMSE",
+                "opaque coverage",
+                "recompose MAE",
+                "reconstruction err",
+                "sec/run",
+            ],
             [
                 [
                     name,
                     values["rgb_mae"],
                     values["rgb_rmse"],
+                    values["opaque_coverage"],
                     values["recompose_mae"],
                     values["reconstruction_error"],
                     values["seconds"],
@@ -224,6 +298,9 @@ def render_markdown(summary: dict[str, Any]) -> str:
         ),
         "",
         "## By condition (one axis changed at a time)",
+        "",
+        "Raw means. They still carry the difficulty of whichever eyes ended up in each"
+        " group — read the paired table below before ranking conditions.",
         "",
     ]
     conditions = summary["by_condition"]
@@ -241,6 +318,25 @@ def render_markdown(summary: dict[str, Any]) -> str:
             ],
         )
     )
+    if summary.get("paired_delta"):
+        parts += [
+            "",
+            "### Paired against the baseline of the same eye (bare & worn-only, no brush)",
+            "",
+            "Every condition is generated for the *same* background and product as its"
+            " baseline, so this delta isolates the condition. Negative = worse than that"
+            " eye's own baseline.",
+            "",
+            _table(
+                ["condition", "Dice delta", "pairs"],
+                [
+                    [name, values["dice_delta"], values["pairs"]]
+                    for name, values in sorted(
+                        summary["paired_delta"].items(), key=lambda item: item[1]["dice_delta"]
+                    )
+                ],
+            ),
+        ]
     if summary.get("pixel_mutation"):
         parts += [
             "",
@@ -282,8 +378,19 @@ def render_markdown(summary: dict[str, Any]) -> str:
             "",
             "## ROI downscale (crop_roi, before extraction starts)",
             "",
+            "Measured against an INTER_NEAREST resize, which keeps original pixel values by"
+            " construction. **Not a quality comparison**: nearest is not the right answer"
+            " for a downscale, so `difference from nearest` counts how many product pixels"
+            " stop being original pixels — it does not say the image looks worse.",
+            "",
             _table(
-                ["target ROI width", "scale", "interpolation", "exact preserved", "RGB MAE"],
+                [
+                    "target ROI width",
+                    "scale",
+                    "interpolation",
+                    "pixels kept exactly",
+                    "difference vs nearest",
+                ],
                 [
                     [
                         row["roi_width"],
@@ -320,10 +427,23 @@ def render_markdown(summary: dict[str, Any]) -> str:
     return "\n".join(parts) + "\n"
 
 
+def _json_safe(value: Any) -> Any:
+    """NaN/Infinity are not valid JSON: any strict parser (browsers, jq) rejects them."""
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    return value
+
+
 def write_report(output_root: str, rows: Sequence[dict[str, Any]], summary: dict[str, Any]) -> None:
     os.makedirs(output_root, exist_ok=True)
     with open(os.path.join(output_root, "summary.json"), "w", encoding="utf-8") as handle:
-        json.dump(summary, handle, ensure_ascii=False, indent=2, default=str)
+        json.dump(_json_safe(summary), handle, ensure_ascii=False, indent=2, default=str, allow_nan=False)
     write_csv(os.path.join(output_root, "summary.csv"), rows)
     with open(os.path.join(output_root, "report.md"), "w", encoding="utf-8") as handle:
         handle.write(render_markdown(summary))

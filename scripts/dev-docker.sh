@@ -11,7 +11,17 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-IMAGE=${IMAGE:-matuge-change-dev}
+
+# 引数なしのときの既定コマンド。"${@:-python -m pytest}" と書くと、既定値が
+# 1個の実行ファイル名として渡って "python -m pytest: not found" になる。
+if [ "$#" -eq 0 ]; then
+  set -- python -m pytest
+fi
+
+# イメージのタグに Dockerfile.dev と requirements の内容ハッシュを入れる。
+# 固定タグだと、依存や ruff のバージョンを変えても古いイメージが使われ続ける。
+STAMP=$(cat Dockerfile.dev requirements.txt requirements-dev.txt | sha256sum | cut -c1-12)
+IMAGE=${IMAGE:-matuge-change-dev:$STAMP}
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "building $IMAGE ..." >&2
@@ -31,5 +41,6 @@ exec docker run --rm \
   --volume "$PWD:/app" \
   --tmpfs /app/data:exec,mode=1777 \
   --workdir /app \
+  --env PYTHONPATH=/app \
   --env PYTEST_ADDOPTS="-o cache_dir=/tmp/pytest_cache" \
-  "$IMAGE" "${@:-python -m pytest}"
+  "$IMAGE" "$@"

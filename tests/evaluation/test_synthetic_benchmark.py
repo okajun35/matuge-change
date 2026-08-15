@@ -14,7 +14,7 @@ import pytest
 
 from evaluation import backgrounds, report
 from evaluation.dataset import load_dataset
-from evaluation.generator import build_case, plan_cases, write_case
+from evaluation.generator import build_case, plan_cases, write_case, write_manifest
 from evaluation.pipeline import oracle_constraints, run_pipeline, to_roi_space
 from evaluation.products import ProceduralProduct
 from evaluation.runner import RunConfig, evaluate_case, run_dataset
@@ -29,7 +29,37 @@ def dataset(tmp_path_factory) -> str:
     specs = plan_cases(list(by_name), [product.name], count=5, seed=0)
     for spec in specs:
         write_case(root, build_case(by_name[spec.background], product, spec))
+    write_manifest(root, specs)
     return root
+
+
+class TestManifest:
+    def test_only_the_listed_cases_are_loaded(self, tmp_path):
+        """Regenerating a smaller dataset must not inherit the previous, larger one."""
+        root = str(tmp_path)
+        sources = backgrounds.procedural_backgrounds(1, width=96, height=72, seed=1)
+        product = ProceduralProduct(seed=1, n_strands=8)
+        by_name = {b.name: b for b in sources}
+        many = plan_cases(list(by_name), [product.name], count=4, seed=0)
+        for spec in many:
+            write_case(root, build_case(by_name[spec.background], product, spec))
+        write_manifest(root, many)
+        assert len(load_dataset(root)) == 4
+
+        few = many[:2]
+        write_manifest(root, few)  # the other two folders are still on disk
+        assert [case.case_id for case in load_dataset(root)] == [s.case_id for s in few]
+
+    def test_a_missing_case_is_an_error_not_a_silent_gap(self, tmp_path):
+        root = str(tmp_path)
+        sources = backgrounds.procedural_backgrounds(1, width=96, height=72, seed=1)
+        product = ProceduralProduct(seed=1, n_strands=8)
+        by_name = {b.name: b for b in sources}
+        specs = plan_cases(list(by_name), [product.name], count=2, seed=0)
+        write_case(root, build_case(by_name[specs[0].background], product, specs[0]))
+        write_manifest(root, specs)
+        with pytest.raises(FileNotFoundError, match="missing"):
+            load_dataset(root)
 
 
 class TestDatasetRoundTrip:
@@ -197,7 +227,111 @@ class TestFailuresAreRecorded:
         assert np.isnan(summary["overall"]["bare/auto"]["dice"])
 
 
+class TestRecompositionReference:
+    def test_reference_is_the_ground_truth_product_on_the_same_base(self, dataset):
+        """Comparing against worn.png would fold that photo's JPEG/noise/shadow into the
+        score — on a JPEG case it made the metric read below the floor those artefacts
+        alone set, i.e. lower than any error it could detect."""
+        from evaluation.runner import ideal_recomposition
+
+        case = load_dataset(dataset)[0]
+        reference = ideal_recomposition(case)
+        alpha = case.gt_alpha[..., None].astype(np.float64) / 255.0
+        expected = alpha * case.gt_product[:, :, :3] + (1 - alpha) * case.bare
+        assert np.abs(reference.astype(np.float64) - expected).max() <= 1.0
+
+    def test_perfect_extraction_would_score_zero(self, dataset):
+        from evaluation import metrics
+        from evaluation.runner import ideal_recomposition
+
+        case = load_dataset(dataset)[0]
+        reference = ideal_recomposition(case)
+        result = metrics.region_fidelity(reference, reference, case.gt_mask > 0)
+        assert result["mae"] == pytest.approx(0.0)
+
+    def test_falls_back_to_worn_without_a_ground_truth_product(self, tmp_path):
+        import cv2
+
+        from evaluation.runner import ideal_recomposition
+
+        directory = tmp_path / "case_0001"
+        directory.mkdir()
+        worn = np.full((16, 16, 3), 90, np.uint8)
+        cv2.imwrite(str(directory / "worn.png"), worn)
+        cv2.imwrite(str(directory / "gt_alpha.png"), np.zeros((16, 16), np.uint8))
+        (directory / "metadata.json").write_text(json.dumps({"id": "case_0001"}))
+        case = load_dataset(str(tmp_path))[0]
+        assert np.array_equal(ideal_recomposition(case), worn)
+
+
 class TestAggregation:
+    def test_condition_values_are_not_averaged_together(self):
+        rows = [
+            {
+                "case_id": f"c{i}",
+                "mode": "bare",
+                "brush": "auto",
+                "condition": "rotation_deg",
+                "condition_value": value,
+                "pair_key": "bg|p",
+                "dice": dice,
+            }
+            for i, (value, dice) in enumerate([(5.0, 0.8), (10.0, 0.2)])
+        ]
+        summary = report.summarise(rows)
+        assert set(summary["by_condition"]) == {"rotation_deg = 5.0", "rotation_deg = 10.0"}
+        assert summary["by_condition"]["rotation_deg = 10.0"]["bare/auto"]["dice"] == pytest.approx(0.2)
+
+    def test_paired_delta_removes_the_background_effect(self):
+        """Two eyes of different difficulty, each with its own baseline and blur case."""
+        rows = [
+            {"case_id": "a1", "pair_key": "easy|p", "condition": "baseline", "dice": 0.9},
+            {"case_id": "a2", "pair_key": "easy|p", "condition": "blur_sigma", "dice": 0.8},
+            {"case_id": "b1", "pair_key": "hard|p", "condition": "baseline", "dice": 0.5},
+            {"case_id": "b2", "pair_key": "hard|p", "condition": "blur_sigma", "dice": 0.4},
+        ]
+        for row in rows:
+            row.update({"mode": "bare", "brush": "auto", "condition_value": None})
+        summary = report.summarise(rows)
+        # raw means would say blur scores 0.60 against a 0.70 baseline; paired says -0.10
+        assert summary["paired_delta"]["blur_sigma = None"]["dice_delta"] == pytest.approx(-0.1)
+        assert summary["paired_delta"]["blur_sigma = None"]["pairs"] == 2
+
+    def test_success_rate_is_reported_next_to_the_averages(self):
+        rows = [
+            {"case_id": "a", "mode": "bare", "brush": "auto", "condition": "baseline", "dice": 1.0},
+            {
+                "case_id": "b",
+                "mode": "bare",
+                "brush": "auto",
+                "condition": "baseline",
+                "dice": float("nan"),
+                "failed": True,
+            },
+        ]
+        summary = report.summarise(rows)
+        # the mean skips the crash, so the success rate is what stops that being a lie
+        assert summary["overall"]["bare/auto"]["dice"] == pytest.approx(1.0)
+        assert summary["overall"]["bare/auto"]["success_rate"] == pytest.approx(0.5)
+        assert "success" in report.render_markdown(summary)
+
+    def test_summary_json_is_parseable_by_a_strict_reader(self, tmp_path):
+        rows = [
+            {
+                "case_id": "a",
+                "mode": "bare",
+                "brush": "auto",
+                "condition": "baseline",
+                "dice": float("nan"),
+            }
+        ]
+        output = str(tmp_path / "out")
+        report.write_report(output, rows, report.summarise(rows))
+        with open(os.path.join(output, "summary.json"), encoding="utf-8") as handle:
+            text = handle.read()
+        assert "NaN" not in text  # json.load accepts NaN, browsers and jq do not
+        assert json.loads(text)["overall"]["bare/auto"]["dice"] is None
+
     def test_nan_metrics_do_not_pollute_the_mean(self):
         rows = [
             {"case_id": "a", "mode": "bare", "brush": "auto", "condition": "baseline", "dice": 0.8},

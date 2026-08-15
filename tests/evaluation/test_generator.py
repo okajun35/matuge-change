@@ -126,18 +126,42 @@ class TestPlanCases:
         assert len(specs) == 12
         assert {s.case_id for s in specs} == {f"case_{i + 1:04d}" for i in range(12)}
         assert specs[0].condition == "baseline"
-        # every case differs from the baseline in at most one axis, so a condition
-        # breakdown attributes a score drop to a single cause
         assert len({s.condition for s in specs}) > 3
+
+    def test_every_condition_shares_a_background_with_its_baseline(self):
+        """Otherwise a condition is compared against a *different* eye, and the
+        condition breakdown measures background difficulty instead of the condition."""
+        specs = generator.plan_cases([f"bg_{i}" for i in range(3)], ["p"], count=generator.BLOCK_SIZE * 3)
+        baselines = {s.pair_key for s in specs if s.condition == "baseline"}
+        for spec in specs:
+            assert spec.pair_key in baselines, f"{spec.case_id} has no baseline for {spec.pair_key}"
+
+    def test_a_block_holds_every_variant_exactly_once(self):
+        specs = generator.plan_cases(["bg"], ["p"], count=generator.BLOCK_SIZE)
+        conditions = [(s.condition, str(s.condition_value)) for s in specs]
+        assert len(conditions) == len(set(conditions))
+        assert sum(1 for s in specs if s.condition == "baseline") == 1
 
     def test_is_deterministic(self):
         a = generator.plan_cases(["bg"], ["p"], count=9, seed=4)
         b = generator.plan_cases(["bg"], ["p"], count=9, seed=4)
         assert [s.as_dict() for s in a] == [s.as_dict() for s in b]
 
-    def test_uses_every_background(self):
-        specs = generator.plan_cases([f"bg_{i}" for i in range(5)], ["p"], count=20)
+    def test_seed_changes_which_pairs_come_first(self):
+        names = [f"bg_{i}" for i in range(6)]
+        first = generator.plan_cases(names, ["p"], count=6, seed=1)[0].background
+        others = {generator.plan_cases(names, ["p"], count=6, seed=s)[0].background for s in range(8)}
+        assert len(others) > 1, "the seed argument must actually do something"
+        assert first == generator.plan_cases(names, ["p"], count=6, seed=1)[0].background
+
+    def test_uses_every_background_when_the_budget_allows(self):
+        specs = generator.plan_cases([f"bg_{i}" for i in range(5)], ["p"], count=generator.BLOCK_SIZE * 5)
         assert len({s.background for s in specs}) == 5
+
+    def test_reports_how_many_blocks_are_complete(self):
+        assert generator.complete_blocks(generator.plan_cases(["a", "b"], ["p"], count=generator.BLOCK_SIZE))
+        partial = generator.plan_cases(["a", "b"], ["p"], count=generator.BLOCK_SIZE + 3)
+        assert generator.complete_blocks(partial) == 1
 
     def test_rejects_empty_inputs(self):
         with pytest.raises(ValueError):

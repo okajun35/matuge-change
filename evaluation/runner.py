@@ -35,7 +35,28 @@ from evaluation.pipeline import (
 
 MODES = ("bare", "worn_only")
 BRUSHES = ("auto", "oracle")
+# how far around the product the recomposition error is measured. Wide enough to catch a
+# halo, narrow enough that untouched background does not dilute the number.
 RECOMPOSITION_BAND_PX = 5
+
+
+def ideal_recomposition(case: Case) -> np.ndarray:
+    """What a perfect extraction would produce on the same base image.
+
+    Comparing the recomposed image against `worn.png` directly would fold the *capture*
+    differences into the score: `worn` carries its own JPEG artefacts, noise and the cast
+    shadow, while the recomposition is built on `bare`. Measured on a JPEG case that made
+    the metric read 7.7 while the floor set by those artefacts alone was 11.6 — i.e. lower
+    than the error it could possibly detect. Compositing the ground-truth product onto the
+    very same base removes that floor and leaves extraction error only.
+    """
+    base = case.bare if case.bare is not None else case.worn
+    gt_product = case.gt_product
+    if gt_product is None:
+        return case.worn
+    alpha = case.gt_alpha[..., None].astype(np.float64) / 255.0
+    blended = alpha * gt_product[:, :, :3] + (1.0 - alpha) * base
+    return np.clip(blended, 0, 255).astype(np.uint8)
 
 
 @dataclass(frozen=True)
@@ -52,6 +73,8 @@ class RunConfig:
         default_factory=lambda: (
             "condition",
             "condition_value",
+            "pair_key",
+            "block",
             "background",
             "product",
             "scale",
@@ -126,6 +149,7 @@ def evaluate_case(
     ignore = case.gt_ignore
     gt_product = case.gt_product
     shape = gt_alpha.shape[:2]
+    reference = ideal_recomposition(case)
 
     for mode in config.modes:
         bare = case.bare if mode == "bare" else None
@@ -170,6 +194,11 @@ def evaluate_case(
                 "error": "",
                 "seconds": round(prediction.seconds, 3),
                 "roi_scale": prediction.roi.scale,
+                # what the pipeline actually did, not what the dataset hoped for:
+                # without landmarks it runs the manual-ROI path, with no eye prior and
+                # no landmark alignment of the bare image
+                "pipeline_has_landmarks": prediction.has_landmarks,
+                "roi_mode": "auto" if prediction.has_landmarks else "manual",
                 "roi_rect": [prediction.roi.x0, prediction.roi.y0, prediction.roi.x1, prediction.roi.y1],
                 "reconstruction_error": prediction.reconstruction_error,
                 **{key: case.metadata.get(key) for key in config.metadata_columns},
@@ -191,12 +220,13 @@ def evaluate_case(
                         gt_product[:, :, 3],
                     )
                 )
+            scored_band = band & inside_roi
+            if ignore is not None:
+                scored_band = scored_band & ~ignore
             row.update(
                 {
                     f"recompose_{key}": value
-                    for key, value in metrics.region_fidelity(
-                        recomposed_full, case.worn, band & inside_roi
-                    ).items()
+                    for key, value in metrics.region_fidelity(recomposed_full, reference, scored_band).items()
                 }
             )
             rows.append(row)

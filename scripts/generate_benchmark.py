@@ -23,7 +23,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from evaluation import backgrounds as background_sources  # noqa: E402
-from evaluation.generator import build_case, plan_cases, write_case  # noqa: E402
+from evaluation.generator import (  # noqa: E402
+    BLOCK_SIZE,
+    MANIFEST,
+    build_case,
+    complete_blocks,
+    plan_cases,
+    write_case,
+    write_manifest,
+)
 from evaluation.products import ImageProduct, ProceduralProduct, load_product_png  # noqa: E402
 
 DEFAULT_OUTPUT = "evaluation-data/generated"
@@ -80,18 +88,46 @@ def main(argv: list[str] | None = None) -> int:
     products_by_name = {product.name: product for product in products}
     specs = plan_cases(list(by_name), list(products_by_name), count=args.cases, seed=args.seed)
 
-    if args.clean and os.path.isdir(args.output):
-        shutil.rmtree(args.output)
+    if args.clean:
+        _clean(args.output)
     os.makedirs(args.output, exist_ok=True)
     for spec in specs:
         case = build_case(by_name[spec.background], products_by_name[spec.product], spec)
         write_case(args.output, case)
         print(f"{spec.case_id}  {spec.background}  {spec.condition}={spec.condition_value}")
+    # the manifest is what stops a smaller regeneration from silently inheriting the
+    # leftover case folders of a previous, larger run
+    write_manifest(args.output, specs, extra={"generated_by": " ".join(sys.argv)})
+
+    blocks = complete_blocks(specs)
     print(
         f"\n{len(specs)} cases written to {args.output} "
         f"({len(by_name)} backgrounds x {len(products_by_name)} products)"
     )
+    print(f"{blocks} complete blocks of {BLOCK_SIZE} (only these support paired comparisons)")
+    if blocks == 0:
+        print(
+            f"warning: no complete block. Use --cases >= {BLOCK_SIZE} so every condition "
+            "shares a background with its baseline.",
+            file=sys.stderr,
+        )
     return 0
+
+
+def _clean(output: str) -> None:
+    """Delete a previously generated dataset, and refuse to delete anything else."""
+    if not os.path.isdir(output):
+        return
+    entries = set(os.listdir(output))
+    looks_generated = MANIFEST in entries or all(
+        os.path.isfile(os.path.join(output, name, "metadata.json")) for name in entries
+    )
+    if entries and not looks_generated:
+        raise SystemExit(
+            f"refusing to --clean {output}: it holds files that this generator did not write. "
+            "Delete it yourself if that is really what you want."
+        )
+    shutil.rmtree(output)
 
 
 if __name__ == "__main__":
