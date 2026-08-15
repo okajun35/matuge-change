@@ -25,9 +25,6 @@
   #catalog input[type=text] { background: #1e1e24; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px; }
   #assetList { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
   #catalogPanel { background: #26262e; }
-  #catalogPanel > summary { cursor: pointer; padding: 8px 16px; font-size: 13px; color: #cfd; list-style: none; }
-  #catalogPanel > summary::before { content: '\25B8 '; }
-  #catalogPanel[open] > summary::before { content: '\25BE '; }
   #assetPager { display: flex; gap: 8px; align-items: center; padding: 0 16px 12px; font-size: 13px; color: #9ab; }
   .asset { background: #2a2a33; border-radius: 6px; padding: 6px; width: 132px; font-size: 12px; }
   .asset img { width: 120px; height: 60px; object-fit: contain; display: block; }
@@ -43,8 +40,9 @@
 <header><h1>matuge-change PoC — まつ毛 Alpha 抽出（商品＋自まつ毛）</h1></header>
 
 <div id="tabs">
-  <button id="tabStill" class="tab-active">静止画モード</button>
+  <button id="tabExtract" class="tab-active">静止画モード</button>
   <button id="tabVideo">動画モード</button>
+  <button id="tabCatalog">商品カタログ <span id="catalogCount"></span></button>
 </div>
 
 <div id="controls">
@@ -80,8 +78,7 @@
   <div id="progress"><div id="progressBar"></div></div>
 </div>
 
-<details id="catalogPanel">
-  <summary>商品カタログ <span id="catalogCount"></span></summary>
+<div id="catalogPanel" style="display:none">
   <div id="catalog">
     <label>商品名 <input type="text" id="assetName" placeholder="ボリュームラッシュ D 0.07"></label>
     <label>ブランド <input type="text" id="assetBrand" placeholder="任意"></label>
@@ -97,7 +94,7 @@
     <span id="pageInfo"></span>
     <button id="btnNextPage" class="secondary">次へ ›</button>
   </div>
-</details>
+</div>
 <div id="status">画像をアップロードしてください。</div>
 
 <div id="stage">
@@ -123,6 +120,7 @@
   </div>
 </div>
 
+<script src="/router.js"></script>
 <script>
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
@@ -131,16 +129,22 @@ const state = {
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
 
-function setMode(mode) {
-  const still = mode === 'still';
-  document.getElementById('tabStill').classList.toggle('tab-active', still);
-  document.getElementById('tabVideo').classList.toggle('tab-active', !still);
-  for (const id of ['controls', 'catalogPanel', 'status', 'stage'])
-    document.getElementById(id).style.display = still ? '' : 'none';
-  document.getElementById('videoMode').style.display = still ? 'none' : '';
+const TAB_OF = { extract: 'tabExtract', video: 'tabVideo', catalog: 'tabCatalog' };
+
+function renderRoute() {
+  const route = Router.parseRoute(location.hash);
+  const visible = Router.panelVisibility(route);
+  for (const [id, shown] of Object.entries(visible))
+    document.getElementById(id).style.display = shown ? '' : 'none';
+  for (const [name, tabId] of Object.entries(TAB_OF))
+    document.getElementById(tabId).classList.toggle('tab-active', name === route);
+  if (route === 'catalog') refreshAssets();   // 別タブでの登録・削除を反映
 }
-document.getElementById('tabStill').onclick = () => setMode('still');
-document.getElementById('tabVideo').onclick = () => setMode('video');
+
+const navigate = (route) => { location.hash = Router.hashFor(route); };
+for (const [name, tabId] of Object.entries(TAB_OF))
+  document.getElementById(tabId).onclick = () => navigate(name);
+window.addEventListener('hashchange', renderRoute);
 
 const vstatus = (msg) => document.getElementById('videoStatus').textContent = msg;
 
@@ -565,7 +569,8 @@ document.getElementById('assetQuery').oninput = (e) => {
 
 (async () => {
   state.supabase = await connectRealtime();
-  refreshAssets();
+  renderRoute();          // ハッシュに応じた初期表示（カタログ以外でも件数は取りに行く）
+  await refreshAssets();
 })();
 </script>
 </body>

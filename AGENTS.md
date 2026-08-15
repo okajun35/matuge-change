@@ -19,6 +19,7 @@
 ```bash
 . .venv/bin/activate
 python -m pytest          # テスト実行
+node --test tests/frontend # フロントのルーティングのテスト
 ruff check                # Lint
 ruff format               # フォーマット
 pre-commit run --all-files
@@ -35,8 +36,9 @@ pre-commit run --all-files
 - `backend/video.py` — 動画モード（ベストフレーム選択・目元領域差し替え）
 - `backend/api/` — FastAPI ルータと合成ルート（`container.py`）
 - `backend/app.py` — FastAPI エントリポイント（ルータ登録のみ）
-- `frontend/index.html` — SPA（Canvasブラシ補正UI・動画モード）
-- `tests/` — pytest（API + ドメイン）
+- `frontend/index.html` — SPA（Canvasブラシ補正UI・動画モード・商品カタログ）
+- `frontend/router.js` — ハッシュルーティング（DOM に依存しない純粋関数）
+- `tests/` — pytest（API + ドメイン）、`tests/frontend/` は node:test
 - `models/face_landmarker.task` — MediaPipeモデル（コミットしない）
 - `data/` — セッションデータ（コミットしない）
 
