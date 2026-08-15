@@ -19,7 +19,7 @@
 ```bash
 . .venv/bin/activate
 python -m pytest          # テスト実行
-node --test tests/frontend # フロントのルーティングのテスト
+node --test tests/frontend/router.test.js # フロントのルーティングのテスト
 ruff check                # Lint
 ruff format               # フォーマット
 pre-commit run --all-files
