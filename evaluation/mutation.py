@@ -1,7 +1,9 @@
 """How much do product pixels change when they are moved?
 
-"Pixel Preserve" is the core promise of the project, but every path that places the
-extracted product somewhere else resamples it:
+"Generative Product Preserve" is the core promise of the project — the product is never
+redrawn by a generative model. It is *not* a promise of bit-identical pixels, and this
+module is where that distinction gets numbers: every path that places the extracted
+product somewhere else resamples it.
 
 * `matting.recompose_onto` warps the RGBA with `INTER_LINEAR` **without premultiplying
   alpha**, so the colour stored in fully transparent pixels bleeds into the lash tips;
