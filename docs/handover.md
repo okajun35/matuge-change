@@ -72,6 +72,10 @@
   - `local_*` … 解析前に選択したファイルの `URL.createObjectURL()` プレビュー。セッション不要・表示専用
 - **表示専用レイヤーで `paintCanvas` のサイズを変えてはいけない**（ブラシ座標＝制約PNGの座標系が壊れる）。`isViewOnlyLayer()` で分岐し、ペイントキャンバスを非表示＋ブラシOFFにしている
 - ズームは `#canvasWrap` の `transform: scale()` で行い、`#canvasWrap` の実寸を `canvas幅 * zoom` に設定してスクロール範囲を合わせる。ブラシ座標は `(clientX - rect.left) / state.zoom` で画像座標へ戻す
+- レイヤー切替時のズームは**解像度が同じ間は維持**する（`showLayer` の `sizeChanged` 判定）。解像度が変わったとき（ROIレイヤー ↔ `source_*` 等）だけ自動フィット/等倍に戻る
+- コントロールは `#controls` 内の `fieldset.group` で手順ごと（① 入力と解析 / ② ブラシ補正とMatting / ③ AI加工画像へ再合成 / ④ 商品登録 / セッション）にグループ化。表示レイヤー・ズーム・保存はステージ直上の `#viewBar`。ボタンラベルの丸数字は廃止（legend側に付与）
+- ROI-Bの位置合わせコントロール（`#fitControls`）は**常時表示**し、使えないときは非活性＋ツールチップで理由（未解析／自動モード／加工画像レイヤー以外を表示中）を案内する。`display:none` での出し入れは「ボタンが見つからない」問題を生むため戻さないこと
+- ブラシ表示ON/OFF（`#brushShow`、キーボード `B`）は**見た目だけ**を切り替える。制約PNGは `paintCanvas` の中身から作られ続けるので、OFFでもMattingにはストロークが効く。ブラシツールを選ぶと自動でONに戻る。表示制御は `applyBrushVisibility()` に集約（表示専用レイヤーの非表示条件もここ）
 - レイヤー一覧を再構築するとき（Matting後・再開後）、`layers` に無いものは消えるので注意:
   - セッション再開時はファイル入力が空でも `roi_b` を残す
   - Matting再実行で `composite_on_edited` を落とさない
