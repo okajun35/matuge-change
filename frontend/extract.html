@@ -239,6 +239,7 @@ function registerLocalPreview(inputId, layer) {
 }
 registerLocalPreview('fileWith', 'local_with');
 registerLocalPreview('fileWithout', 'local_without');
+document.getElementById('fileWithout').addEventListener('change', () => updateRoiHint());
 registerLocalPreview('fileEdited', 'local_edited');
 
 // 横顔・目のアップは顔検出が効かないため、元画像上でドラッグした矩形を目元ROIとして送る
@@ -265,9 +266,14 @@ function updateRoiHint() {
   const hint = document.getElementById('roiHint');
   if (!isManualRoi()) { hint.textContent = ''; drawRoiOverlay(); return; }
   const r = state.roiRect;
-  hint.textContent = r
+  const base = r
     ? `ROI ${Math.round(Math.abs(r[2] - r[0]))}×${Math.round(Math.abs(r[3] - r[1]))}px`
     : '装着画像を表示して目元をドラッグして囲んでください';
+  // 手動ROIでは顔ランドマーク位置合わせができないので、未装着画像は同じ矩形で切り抜かれる
+  const bareWarning = document.getElementById('fileWithout').files[0]
+    ? '　⚠ 手動ROIでは未装着画像を位置合わせできません（同じ構図でないなら外してください）'
+    : '';
+  hint.textContent = base + bareWarning;
   drawRoiOverlay();
 }
 roiModeSelect.onchange = () => {
