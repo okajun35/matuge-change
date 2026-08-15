@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Form
 from fastapi.responses import Response
 
@@ -65,13 +67,46 @@ async def get_asset(asset_id: str):
     return row
 
 
+def _disposition(kind: str, asset_id: str, filename: str) -> dict[str, str]:
+    """Content-Disposition with a UTF-8 filename (product names are Japanese)."""
+    name = quote(filename)
+    return {"Content-Disposition": f"{kind}; filename=\"{asset_id}.png\"; filename*=UTF-8''{name}"}
+
+
+def _asset_filename(asset_id: str, suffix: str) -> str:
+    try:
+        name = str(container().catalog.get_asset(asset_id).get("name") or asset_id)
+    except Exception:
+        name = asset_id
+    return f"{name}{suffix}.png"
+
+
 @router.get("/{asset_id}/image")
 async def get_asset_image(asset_id: str):
+    """Product RGBA PNG (alpha preserved). Inline so the catalog can show it in <img>."""
     try:
         png = container().catalog.load_png(asset_id)
     except Exception as exc:
         raise to_http(exc) from exc
-    return Response(content=png, media_type="image/png")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers=_disposition("inline", asset_id, _asset_filename(asset_id, "")),
+    )
+
+
+@router.get("/{asset_id}/mask")
+async def get_asset_mask(asset_id: str):
+    """Alpha channel only, as a grayscale PNG download."""
+    try:
+        png = container().catalog.load_mask_png(asset_id)
+    except Exception as exc:
+        raise to_http(exc) from exc
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers=_disposition("attachment", asset_id, _asset_filename(asset_id, "-mask")),
+    )
 
 
 @router.get("/{asset_id}/similar")

@@ -1,5 +1,8 @@
 import uuid
 
+import cv2
+import numpy as np
+
 
 class TestRegisterAsset:
     def test_registers_the_extracted_product(self, client, matted_session):
@@ -40,6 +43,40 @@ class TestBrowseCatalog:
 
     def test_unknown_asset_returns_404(self, client):
         assert client.get("/api/assets/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+class TestAssetDownload:
+    """登録済み商品はアルファ付きPNGとマスク単体をダウンロードできる。"""
+
+    def _asset_id(self, client, session):
+        return client.post("/api/assets", data={"session_id": session, "name": "DLテスト"}).json()["id"]
+
+    def test_image_keeps_alpha_and_suggests_a_filename(self, client, matted_session):
+        res = client.get(f"/api/assets/{self._asset_id(client, matted_session)}/image")
+        assert res.status_code == 200
+        # <img> で表示もするので inline。ファイル名だけ提案する。
+        assert res.headers["content-disposition"].startswith("inline")
+        assert ".png" in res.headers["content-disposition"]
+        rgba = cv2.imdecode(np.frombuffer(res.content, np.uint8), cv2.IMREAD_UNCHANGED)
+        assert rgba.shape[2] == 4
+
+    def test_mask_returns_grayscale_alpha_png(self, client, matted_session):
+        asset_id = self._asset_id(client, matted_session)
+        res = client.get(f"/api/assets/{asset_id}/mask")
+        assert res.status_code == 200
+        assert res.headers["content-type"] == "image/png"
+        assert "attachment" in res.headers["content-disposition"]
+        mask = cv2.imdecode(np.frombuffer(res.content, np.uint8), cv2.IMREAD_UNCHANGED)
+        assert mask.ndim == 2
+
+        rgba = cv2.imdecode(
+            np.frombuffer(client.get(f"/api/assets/{asset_id}/image").content, np.uint8),
+            cv2.IMREAD_UNCHANGED,
+        )
+        assert np.array_equal(mask, rgba[..., 3])
+
+    def test_unknown_asset_mask_returns_404(self, client):
+        assert client.get("/api/assets/nope/mask").status_code == 404
 
 
 class TestCatalogPaging:

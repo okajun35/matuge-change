@@ -160,6 +160,12 @@ class TestPages:
         for marker in ("assetQuery", "btnPrevPage", "btnNextPage", "offset"):
             assert marker in res.text
 
+    def test_catalog_page_offers_png_and_mask_downloads(self):
+        res = client.get("/")
+        assert "/image" in res.text
+        assert "/mask" in res.text
+        assert "download" in res.text
+
     def test_extract_page_has_static_mode_controls(self):
         res = client.get("/extract.html")
         assert res.status_code == 200
