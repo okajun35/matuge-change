@@ -5,9 +5,11 @@
 <title>matuge-change PoC — 静止画モード（まつ毛Alpha抽出）</title>
 <link rel="stylesheet" href="/common.css">
 <style>
-  #stage { position: relative; margin: 12px auto; overflow: auto; max-width: 98vw; }
+  #stage { position: relative; margin: 12px auto; overflow: auto; max-width: 98vw; height: 72vh; background: #111; }
+  #canvasWrap { position: relative; transform-origin: 0 0; }
   canvas { position: absolute; left: 0; top: 0; image-rendering: auto; }
   #baseCanvas { position: relative; }
+  #zoomLabel { display: inline-block; min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
   .brush-active { outline: 2px solid #ff5; }
   #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; width: 220px; }
   #progressBar { height: 100%; width: 0; background: #4a6cf7; transition: width .2s; }
@@ -33,6 +35,13 @@
     <select id="layerSelect">
       <option value="roi_a">Original (装着)</option>
     </select>
+  </label>
+  <label>ズーム:
+    <button id="btnZoomOut" class="secondary">−</button>
+    <span id="zoomLabel">100%</span>
+    <button id="btnZoomIn" class="secondary">＋</button>
+    <button id="btnZoomFit" class="secondary">全体</button>
+    <button id="btnZoomReset" class="secondary">100%</button>
   </label>
   <label>ブラシ:
     <button id="btnAdd" class="secondary">＋ 商品</button>
@@ -66,20 +75,24 @@
 <div class="status" id="status">① 装着画像を選ぶ →②「解析開始」→（必要ならブラシで補正）→③「Matting実行」。</div>
 
 <div id="stage">
-  <canvas id="baseCanvas"></canvas>
-  <canvas id="paintCanvas"></canvas>
+  <div id="canvasWrap">
+    <canvas id="baseCanvas"></canvas>
+    <canvas id="paintCanvas"></canvas>
+  </div>
 </div>
 
 <script>
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
   strokes: [], current: null, supabase: null, channel: null,
+  zoom: 1, localUrls: {},
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
 const baseCanvas = document.getElementById('baseCanvas');
 const paintCanvas = document.getElementById('paintCanvas');
 const stage = document.getElementById('stage');
+const canvasWrap = document.getElementById('canvasWrap');
 const bctx = baseCanvas.getContext('2d');
 const pctx = paintCanvas.getContext('2d');
 const status = (msg) => document.getElementById('status').textContent = msg;
@@ -96,58 +109,117 @@ async function postForm(url, fd) {
   return res.json();
 }
 
+const LAYER_NAMES = {
+  roi_a: 'Original (装着)', roi_b: 'Aligned (未装着)', difference: 'Difference',
+  probability: 'Probability', trimap: 'Trimap', alpha: 'Alpha',
+  product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成',
+  composite_on_edited: '編集済み画像へ再合成',
+  source_with: '元画像 (装着)', source_without: '元画像 (未装着)',
+  source_edited: '元画像 (AI加工済み)',
+  local_with: '選択した画像 (装着)', local_without: '選択した画像 (未装着)',
+  local_edited: '選択した画像 (AI加工済み)'
+};
+
 function setLayerOptions(layers) {
-  const names = {
-    roi_a: 'Original (装着)', roi_b: 'Aligned (未装着)', difference: 'Difference',
-    probability: 'Probability', trimap: 'Trimap', alpha: 'Alpha',
-    product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成',
-    composite_on_edited: '編集済み画像へ再合成',
-    source_with: '元画像 (装着)', source_without: '元画像 (未装着)',
-    source_edited: '元画像 (AI加工済み)'
-  };
   const sel = document.getElementById('layerSelect');
   const current = sel.value;
   sel.innerHTML = '';
-  for (const l of layers) {
+  // 解析後もアップロード直後のプレビューを見比べられるよう local_* を末尾に残す
+  const all = [...layers, ...Object.keys(state.localUrls).filter(l => !layers.includes(l))];
+  for (const l of all) {
     const opt = document.createElement('option');
-    opt.value = l; opt.textContent = names[l] || l;
+    opt.value = l; opt.textContent = LAYER_NAMES[l] || l;
     sel.appendChild(opt);
   }
-  sel.value = layers.includes(current) ? current : layers[layers.length - 1];
+  // 解析・Matting 後は結果を見せたいので、プレビュー表示中なら新しいサーバ側レイヤーへ切り替える
+  const keep = current && all.includes(current) && !isLocalLayer(current);
+  sel.value = keep ? current : (layers[layers.length - 1] || all[all.length - 1]);
   showLayer(sel.value);
 }
 
 const isSourceLayer = (name) => name.startsWith('source_');
+// local_* は解析（セッション作成）前に選択したファイルをブラウザ内で表示するための擬似レイヤー
+const isLocalLayer = (name) => name.startsWith('local_');
+const isViewOnlyLayer = (name) => isSourceLayer(name) || isLocalLayer(name);
+
+function applyZoom() {
+  canvasWrap.style.transform = `scale(${state.zoom})`;
+  canvasWrap.style.width = baseCanvas.width * state.zoom + 'px';
+  canvasWrap.style.height = baseCanvas.height * state.zoom + 'px';
+  document.getElementById('zoomLabel').textContent = Math.round(state.zoom * 100) + '%';
+}
+function setZoom(z) {
+  state.zoom = Math.min(8, Math.max(0.05, z));
+  applyZoom();
+}
+function fitZoom() {
+  if (!baseCanvas.width) return;
+  const pad = 4;
+  setZoom(Math.min(
+    (stage.clientWidth - pad) / baseCanvas.width,
+    (stage.clientHeight - pad) / baseCanvas.height,
+  ));
+}
+document.getElementById('btnZoomIn').onclick = () => setZoom(state.zoom * 1.25);
+document.getElementById('btnZoomOut').onclick = () => setZoom(state.zoom / 1.25);
+document.getElementById('btnZoomFit').onclick = fitZoom;
+document.getElementById('btnZoomReset').onclick = () => setZoom(1);
+stage.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;  // Ctrl+ホイールでズーム、素のホイールはスクロールのまま
+  e.preventDefault();
+  setZoom(state.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+}, { passive: false });
 
 function showLayer(name) {
   state.layer = name;
+  const local = isLocalLayer(name);
+  if (!local && !state.session) return;
+  const src = local ? state.localUrls[name] : `/api/image/${state.session}/${name}?t=${Date.now()}`;
+  if (!src) return;
   const dl = document.getElementById('btnDownload');
-  dl.href = `/api/image/${state.session}/${name}`;
+  dl.href = local ? state.localUrls[name] : `/api/image/${state.session}/${name}`;
   dl.setAttribute('download', `${name}.png`);
   const img = new Image();
   img.onload = () => {
     // 元画像は目元ROIと解像度が違うので、ブラシ用キャンバスのサイズ（=制約PNGのサイズ）は変えない
-    const source = isSourceLayer(name);
+    const viewOnly = isViewOnlyLayer(name);
     baseCanvas.width = img.width;
     baseCanvas.height = img.height;
-    if (!source) {
+    if (!viewOnly) {
       paintCanvas.width = state.w = img.width;
       paintCanvas.height = state.h = img.height;
     }
-    paintCanvas.style.display = source ? 'none' : 'block';
-    if (source) setBrush(null, null);
-    // 全身・全顔の元画像は等倍だと巨大なので幅に合わせて縮小表示する
-    baseCanvas.style.maxWidth = source ? '96vw' : 'none';
-    baseCanvas.style.height = 'auto';
-    stage.style.height = source ? 'auto' : img.height + 'px';
-    stage.style.width = source ? 'auto' : img.width + 'px';
+    paintCanvas.style.display = viewOnly ? 'none' : 'block';
+    if (viewOnly) setBrush(null, null);
     stage.classList.toggle('checker', name === 'product_rgba');
     bctx.clearRect(0, 0, img.width, img.height);
     bctx.drawImage(img, 0, 0);
+    // 全身の元画像は等倍だと画面に収まらないので、初期表示は全体が見えるズーム率にする
+    if (img.width > stage.clientWidth || img.height > stage.clientHeight) fitZoom();
+    else setZoom(1);
     restorePaint();
   };
-  img.src = `/api/image/${state.session}/${name}?t=${Date.now()}`;
+  img.onerror = () => status(`エラー: ${LAYER_NAMES[name] || name} を表示できませんでした`);
+  img.src = src;
 }
+
+// 解析を待たずに選択画像を確認できるよう、ファイル選択時点でプレビュー用レイヤーを足す
+function registerLocalPreview(inputId, layer) {
+  document.getElementById(inputId).addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (state.localUrls[layer]) URL.revokeObjectURL(state.localUrls[layer]);
+    if (!file) { delete state.localUrls[layer]; return; }
+    state.localUrls[layer] = URL.createObjectURL(file);
+    const sel = document.getElementById('layerSelect');
+    const layers = [...sel.options].map(o => o.value);
+    setLayerOptions(layers.includes(layer) ? layers : [...layers, layer]);
+    sel.value = layer;
+    showLayer(layer);
+  });
+}
+registerLocalPreview('fileWith', 'local_with');
+registerLocalPreview('fileWithout', 'local_without');
+registerLocalPreview('fileEdited', 'local_edited');
 
 let paintBackup = null;
 const undoStack = [], redoStack = [];
@@ -269,7 +341,8 @@ function dab(tool, x, y, r) {
 
 function paintAt(e) {
   const rect = paintCanvas.getBoundingClientRect();
-  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  // 表示はズーム倍率でスケールされるので、画像座標へ戻して塗る
+  const x = (e.clientX - rect.left) / state.zoom, y = (e.clientY - rect.top) / state.zoom;
   const r = +document.getElementById('brushSize').value;
   dab(TOOL_OF[state.brush], x, y, r);
   if (state.current) state.current.points.push([Math.round(x), Math.round(y)]);
