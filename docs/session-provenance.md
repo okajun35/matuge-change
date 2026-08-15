@@ -53,19 +53,15 @@ data/<session_id>/
 - TDD: `tests/sessions/test_artifacts.py`（保存・履歴のドメインテスト）と
   `tests/api/test_sessions_api.py::TestRunHistoryApi`（API）を Red → Green の順で追加した。
 
-## カタログのページングと画面分割
+## カタログのページング
 
 商品が増えると一覧が縦に伸び、抽出結果（`#stage`）が画面下に押し出されていた。カタログを
-別画面（ハッシュルーティング）に切り出し、サーバー側ページングと名前 / ブランド検索を入れた。
+`<details>` で折りたたみ、サーバー側ページングと名前 / ブランド検索を入れた。
 
 - `GET /api/assets?limit=12&offset=0&q=` → `{"assets": [...], "total": n, "limit": ..., "offset": ...}`
 - ローカルは JSON インデックスを新しい順に並べて窓を切り出し、Supabase は
   `select(count="exact").or_(name.ilike/brand.ilike).range(offset, offset+limit-1)`
 - UI は 12 件/ページ、前へ / 次へ、検索は 250ms デバウンス。末尾ページが空になったら 1 ページ戻る
-- 画面は `#/extract`（静止画）/ `#/video` / `#/catalog` の3ルート。`frontend/router.js` に DOM を
-  触らない `parseRoute` / `hashFor` / `panelVisibility` を切り出し、`node --test tests/frontend` で
-  テストする（未知のハッシュは `#/extract` へフォールバック）。SPA のままなので session_id や
-  Canvas の状態はタブを跨いでも保持され、ブラウザの戻る / 進むも効く。
 
 ## 今後（認証と Storage 移行）
 

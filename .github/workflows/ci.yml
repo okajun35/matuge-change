@@ -50,6 +50,3 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
-
-      - name: Run frontend tests
-        run: node --test tests/frontend
