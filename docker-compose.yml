@@ -1,0 +1,22 @@
+services:
+  app:
+    build: .
+    image: matuge-change
+    ports:
+      - "8000:8000"
+    volumes:
+      # 抽出結果・カタログをホスト側（WSL）に残す
+      - ./data:/app/data
+    environment:
+      # 未設定ならローカル実装（data/ 配下）で動く
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
+    # MediaPipe / numba のインポートに時間がかかるため start_period を長めにとる
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
