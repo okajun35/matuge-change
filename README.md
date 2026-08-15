@@ -198,6 +198,7 @@ GitHub Actions（`.github/workflows/ci.yml`）で PR / main push 時に
 - [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
 - [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）
 - [docs/session-provenance.md](docs/session-provenance.md) — 元画像 / 合成元 / 合成結果と実行履歴のローカル保存
+- [docs/devin-supabase-usage.md](docs/devin-supabase-usage.md) — Devin をどう使って開発したか（git 履歴ベース）と Supabase の用途まとめ
 
 ## 起動
 
