@@ -13,15 +13,31 @@ from backend.strokes.constraints import decode_constraints_png
 router = APIRouter(prefix="/api")
 
 
+def _roi_rect(raw: str) -> tuple[float, float, float, float] | None:
+    """`"x0,y0,x1,y1"` in source-image pixels; empty means "locate the eyes automatically"."""
+    if not raw.strip():
+        return None
+    parts = raw.split(",")
+    if len(parts) != 4:
+        raise HTTPException(400, "roi_rect must be 'x0,y0,x1,y1'")
+    try:
+        x0, y0, x1, y1 = (float(p) for p in parts)
+    except ValueError as exc:
+        raise HTTPException(400, "roi_rect must be four numbers") from exc
+    return x0, y0, x1, y1
+
+
 @router.post("/session")
 async def create_session(
     image_with: UploadFile = File(...),
     image_without: UploadFile | None = File(None),
+    roi_rect: str = Form(""),
 ):
     img_a = read_upload(image_with)
     img_b = read_upload(image_without) if image_without is not None else None
+    rect = _roi_rect(roi_rect)
     try:
-        return container().sessions.create(img_a, img_b)
+        return container().sessions.create(img_a, img_b, rect)
     except Exception as exc:
         raise to_http(exc) from exc
 
@@ -65,6 +81,7 @@ async def get_session(session_id: str):
         "width": meta["width"],
         "height": meta["height"],
         "has_bare": meta["has_bare"],
+        "mode": meta.get("mode", "auto"),
         "layers": [name for name in LAYER_ORDER if store.has_layer(session_id, name)],
     }
 

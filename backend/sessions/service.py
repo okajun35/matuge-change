@@ -21,6 +21,7 @@ from backend.lash_extraction import (
     ecc_refine,
     eye_prior,
     initial_probability,
+    manual_eye_roi,
     recompose_onto,
     reconstruction_error,
     run_matting,
@@ -39,25 +40,36 @@ class SessionService:
     def __init__(self, store: SessionStore) -> None:
         self.store = store
 
-    def create(self, img_a: np.ndarray, img_b: np.ndarray | None) -> dict[str, Any]:
+    def create(
+        self,
+        img_a: np.ndarray,
+        img_b: np.ndarray | None,
+        roi_rect: tuple[float, float, float, float] | None = None,
+    ) -> dict[str, Any]:
+        """Start a session. `roi_rect` gives the eye region for images without a
+        detectable face (profiles, eye close-ups); otherwise landmarks locate it."""
         lms_a = detect_landmarks(img_a)
-        if lms_a is None:
+        if roi_rect is None and lms_a is None:
             raise FaceNotDetected("no face detected in the worn image")
 
-        roi = compute_eye_roi(lms_a, img_a.shape)
+        manual = roi_rect is not None
+        roi = manual_eye_roi(roi_rect, img_a.shape) if manual else compute_eye_roi(lms_a, img_a.shape)
         roi_a = crop_roi(img_a, roi)
 
         roi_b = None
         if img_b is not None:
             lms_b = detect_landmarks(img_b)
-            if lms_b is None:
+            if lms_b is None and not manual:
                 raise FaceNotDetected("no face detected in the bare image")
-            roi_b = ecc_refine(roi_a, crop_roi(align_b_to_a(img_a, lms_a, img_b, lms_b), roi))
+            aligned = img_b if lms_a is None or lms_b is None else align_b_to_a(img_a, lms_a, img_b, lms_b)
+            roi_b = ecc_refine(roi_a, crop_roi(aligned, roi))
             evidence = difference_map(roi_a, roi_b)
         else:
             evidence = darkness_map(roi_a)
 
-        prob = initial_probability(evidence, eye_prior(roi_a.shape, lms_a, roi))
+        # no landmarks -> no eye prior to restrict the evidence with
+        prior = np.ones(roi_a.shape[:2]) if lms_a is None else eye_prior(roi_a.shape, lms_a, roi)
+        prob = initial_probability(evidence, prior)
 
         session_id = self.store.create()
         # the uploads themselves are kept so a session can be re-derived later
@@ -70,7 +82,8 @@ class SessionService:
         self.store.save_gray(session_id, "difference", evidence)
         self.store.save_gray(session_id, "probability", prob)
         self.store.save_array(session_id, "probability", prob)
-        self.store.save_array(session_id, "landmarks", lms_a)
+        if lms_a is not None:
+            self.store.save_array(session_id, "landmarks", lms_a)
         self.store.save_meta(
             session_id,
             {
@@ -79,6 +92,7 @@ class SessionService:
                 "has_bare": roi_b is not None,
                 "width": roi_a.shape[1],
                 "height": roi_a.shape[0],
+                "mode": "manual" if manual else "auto",
             },
         )
 
@@ -94,6 +108,7 @@ class SessionService:
             "width": roi_a.shape[1],
             "height": roi_a.shape[0],
             "has_bare": roi_b is not None,
+            "mode": "manual" if manual else "auto",
             "layers": layers,
         }
 
@@ -157,6 +172,10 @@ class SessionService:
         self.store.require(session_id)
         if not self.store.has_layer(session_id, "product_rgba"):
             raise MatteNotReady("run matting first")
+        if not self.store.has_array(session_id, "landmarks"):
+            raise FaceNotDetected(
+                "this session has no face landmarks (manual ROI): recompose needs a detected face"
+            )
         self.store.save_image(session_id, "source_edited", edited)
         rgba = self.store.load_image(session_id, "product_rgba", flags=-1)
         lms_worn = self.store.load_array(session_id, "landmarks")

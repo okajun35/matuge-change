@@ -51,6 +51,29 @@ class TestSession:
         assert res.status_code == 422
         assert "no face" in res.json()["detail"]
 
+    def test_manual_roi_rect_creates_a_session_without_face_detection(self):
+        # 横顔・目のアップ用: ユーザーが矩形でROIを指定すれば顔検出を使わない
+        noise = np.random.default_rng(9).integers(0, 256, size=(200, 200, 3), dtype=np.uint8)
+        res = client.post(
+            "/api/session",
+            files={"image_with": ("a.png", encode_png(noise))},
+            data={"roi_rect": "20,30,180,150"},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["width"] == 160 and body["height"] == 120
+        assert body["mode"] == "manual"
+        shutil.rmtree(os.path.join(DATA_DIR, body["session_id"]), ignore_errors=True)
+
+    def test_malformed_roi_rect_returns_400(self):
+        noise = np.random.default_rng(9).integers(0, 256, size=(200, 200, 3), dtype=np.uint8)
+        res = client.post(
+            "/api/session",
+            files={"image_with": ("a.png", encode_png(noise))},
+            data={"roi_rect": "20,30"},
+        )
+        assert res.status_code == 400
+
     def test_undecodable_image_returns_400(self):
         res = client.post("/api/session", files={"image_with": ("a.png", b"not an image")})
         assert res.status_code == 400

@@ -30,6 +30,25 @@ class TestLocalPreview:
         assert "isLocalLayer" in page
 
 
+class TestRoiModeToggle:
+    """正面（自動顔検出）と横顔・目アップ（手動ROI）をUIで切り替えられること。"""
+
+    def test_mode_selector_exists(self):
+        page = _page()
+        assert "roiMode" in page
+        assert "manual" in page and "auto" in page
+
+    def test_manual_mode_sends_the_drawn_rect(self):
+        page = _page()
+        assert "roi_rect" in page
+        assert "roiRect" in page
+
+    def test_rect_is_drawn_on_the_local_preview(self):
+        page = _page()
+        # 解析前のローカルプレビュー上でドラッグしてROIを決める
+        assert "roiOverlay" in page
+
+
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):
         page = _page()

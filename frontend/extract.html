@@ -13,6 +13,8 @@
   .brush-active { outline: 2px solid #ff5; }
   #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; width: 220px; }
   #progressBar { height: 100%; width: 0; background: #4a6cf7; transition: width .2s; }
+  #roiOverlay { position: absolute; display: none; border: 2px dashed #ff5; background: rgba(255,255,80,.12); pointer-events: none; }
+  #roiHint { font-size: 13px; color: #ffd; }
 </style>
 </head>
 <body>
@@ -27,6 +29,13 @@
 <div class="bar" id="controls">
   <label>① 装着画像: <input type="file" id="fileWith" accept="image/*"></label>
   <label>未装着画像(任意): <input type="file" id="fileWithout" accept="image/*"></label>
+  <label>目元の指定:
+    <select id="roiMode">
+      <option value="auto">正面（顔検出で自動）</option>
+      <option value="manual">横顔・目のアップ（手動ROI）</option>
+    </select>
+  </label>
+  <span id="roiHint"></span>
   <button id="btnUpload">② 解析開始</button>
   <label>セッションID <input type="text" id="sessionId" size="12" placeholder="作業を再開"></label>
   <button id="btnResume" class="secondary">再開</button>
@@ -80,6 +89,7 @@
   <div id="canvasWrap">
     <canvas id="baseCanvas"></canvas>
     <canvas id="paintCanvas"></canvas>
+    <div id="roiOverlay"></div>
   </div>
 </div>
 
@@ -87,7 +97,7 @@
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
   strokes: [], current: null, supabase: null, channel: null,
-  zoom: 1, localUrls: {},
+  zoom: 1, localUrls: {}, roiRect: null,
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
@@ -202,6 +212,7 @@ function showLayer(name) {
       if (img.width > stage.clientWidth || img.height > stage.clientHeight) fitZoom();
       else setZoom(1);
       restorePaint();
+      drawRoiOverlay();
       resolve(true);
     };
     img.onerror = () => {
@@ -229,6 +240,67 @@ function registerLocalPreview(inputId, layer) {
 registerLocalPreview('fileWith', 'local_with');
 registerLocalPreview('fileWithout', 'local_without');
 registerLocalPreview('fileEdited', 'local_edited');
+
+// 横顔・目のアップは顔検出が効かないため、元画像上でドラッグした矩形を目元ROIとして送る
+const roiModeSelect = document.getElementById('roiMode');
+const roiOverlay = document.getElementById('roiOverlay');
+const isManualRoi = () => roiModeSelect.value === 'manual';
+// 矩形は装着画像の座標系なので、装着画像を等倍表示しているレイヤーの上でだけ扱う
+const isRoiLayer = (name) => name === 'local_with' || name === 'source_with';
+
+function drawRoiOverlay() {
+  const r = state.roiRect;
+  if (!r || !isManualRoi() || !isRoiLayer(state.layer)) {
+    roiOverlay.style.display = 'none';
+    return;
+  }
+  roiOverlay.style.display = 'block';
+  roiOverlay.style.left = Math.min(r[0], r[2]) + 'px';
+  roiOverlay.style.top = Math.min(r[1], r[3]) + 'px';
+  roiOverlay.style.width = Math.abs(r[2] - r[0]) + 'px';
+  roiOverlay.style.height = Math.abs(r[3] - r[1]) + 'px';
+}
+
+function updateRoiHint() {
+  const hint = document.getElementById('roiHint');
+  if (!isManualRoi()) { hint.textContent = ''; drawRoiOverlay(); return; }
+  const r = state.roiRect;
+  hint.textContent = r
+    ? `ROI ${Math.round(Math.abs(r[2] - r[0]))}×${Math.round(Math.abs(r[3] - r[1]))}px`
+    : '装着画像を表示して目元をドラッグして囲んでください';
+  drawRoiOverlay();
+}
+roiModeSelect.onchange = () => {
+  // ROIを引ける状態にするため、手動に切り替えたら装着画像のプレビューへ移動する
+  if (isManualRoi() && !isRoiLayer(state.layer) && state.localUrls.local_with) showLayer('local_with');
+  updateRoiHint();
+};
+
+function imagePoint(e) {
+  const rect = baseCanvas.getBoundingClientRect();
+  return [(e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom];
+}
+
+let roiDragging = false;
+canvasWrap.addEventListener('pointerdown', (e) => {
+  if (!isManualRoi() || !isRoiLayer(state.layer)) return;
+  const [x, y] = imagePoint(e);
+  state.roiRect = [x, y, x, y];
+  roiDragging = true;
+  updateRoiHint();
+});
+canvasWrap.addEventListener('pointermove', (e) => {
+  if (!roiDragging) return;
+  const [x, y] = imagePoint(e);
+  state.roiRect[2] = x; state.roiRect[3] = y;
+  updateRoiHint();
+});
+window.addEventListener('pointerup', () => {
+  if (!roiDragging) return;
+  roiDragging = false;
+  updateRoiHint();
+});
+updateRoiHint();
 
 let paintBackup = null;
 const undoStack = [], redoStack = [];
@@ -283,7 +355,11 @@ document.getElementById('btnUpload').onclick = async () => {
   fd.append('image_with', fw);
   const fo = document.getElementById('fileWithout').files[0];
   if (fo) fd.append('image_without', fo);
-  status('解析中…（顔検出・位置合わせ・差分計算）');
+  if (isManualRoi()) {
+    if (!state.roiRect) { status('レイヤーで「選択した画像 (装着)」を表示し、目元をドラッグしてROIを囲んでください'); return; }
+    fd.append('roi_rect', state.roiRect.map(Math.round).join(','));
+  }
+  status(isManualRoi() ? '解析中…（手動ROI・差分計算）' : '解析中…（顔検出・位置合わせ・差分計算）');
   let data;
   try {
     data = await postForm('/api/session', fd);
@@ -310,6 +386,8 @@ async function resumeSession(sid) {
   const data = await res.json();
   state.session = sid;
   state.w = data.width; state.h = data.height;
+  roiModeSelect.value = data.mode === 'manual' ? 'manual' : 'auto';
+  updateRoiHint();
   paintBackup = null;
   resetHistory();
   // ストロークの再生前に表示を待つ（onload が paintCanvas をリサイズして中身を消すため）

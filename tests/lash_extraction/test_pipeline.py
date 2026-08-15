@@ -86,6 +86,31 @@ class TestEyeRoi:
         assert crop.shape[1] <= pipeline.MAX_ROI_WIDTH
 
 
+class TestManualEyeRoi:
+    """横顔・目のアップは顔検出が効かないため、ユーザーが矩形でROIを与える。"""
+
+    def test_uses_the_given_rect(self):
+        img = np.zeros((400, 400, 3), np.uint8)
+        roi = pipeline.manual_eye_roi((100, 120, 300, 260), img.shape)
+        assert (roi.x0, roi.y0, roi.x1, roi.y1) == (100, 120, 300, 260)
+        assert roi.scale == 1.0
+        assert pipeline.crop_roi(img, roi).shape[:2] == (140, 200)
+
+    def test_normalises_reversed_and_out_of_bounds_rects(self):
+        roi = pipeline.manual_eye_roi((520, 300, 200, -40), (400, 400, 3))
+        assert (roi.x0, roi.y0, roi.x1, roi.y1) == (200, 0, 400, 300)
+
+    def test_downscales_wide_rect(self):
+        img = np.zeros((4000, 4000, 3), np.uint8)
+        roi = pipeline.manual_eye_roi((0, 0, 4000, 2000), img.shape)
+        assert roi.scale < 1.0
+        assert pipeline.crop_roi(img, roi).shape[1] <= pipeline.MAX_ROI_WIDTH
+
+    def test_rejects_a_degenerate_rect(self):
+        with pytest.raises(ValueError):
+            pipeline.manual_eye_roi((10, 10, 15, 200), (400, 400, 3))
+
+
 class TestDifferenceMap:
     def test_identical_images_give_zero(self):
         rng = np.random.default_rng(1)
