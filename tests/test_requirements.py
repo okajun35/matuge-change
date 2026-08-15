@@ -19,4 +19,3 @@ def test_direct_dependencies_are_exactly_pinned(filename: str):
     for dependency in _dependencies(filename):
         name, separator, version = dependency.partition("==")
         assert separator and name and version, f"{filename}: dependency is not exactly pinned: {dependency}"
-
