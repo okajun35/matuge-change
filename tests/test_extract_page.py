@@ -130,6 +130,14 @@ class TestRoiModeToggle:
         assert "state.fitScale = 100;" in page
         assert "document.getElementById('fitScale').value = state.fitScale;" in page
 
+    def test_fit_availability_updates_before_layer_image_load(self):
+        page = _page()
+        assert "state.layer = name;\n  updateFitAvailability();" in page
+
+    def test_fit_availability_updates_when_layer_image_fails(self):
+        page = _page()
+        assert "img.onerror = () => {\n      updateFitAvailability();" in page
+
 
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):

@@ -211,6 +211,7 @@ stage.addEventListener('wheel', (e) => {
 // 表示完了を待てるよう Promise を返す（ストローク再生はキャンバスのリサイズ後に行う必要がある）
 function showLayer(name) {
   state.layer = name;
+  updateFitAvailability();
   document.getElementById('layerSelect').value = name;
   const local = isLocalLayer(name);
   if (!local && !state.session) return Promise.resolve(false);
@@ -245,6 +246,7 @@ function showLayer(name) {
       resolve(true);
     };
     img.onerror = () => {
+      updateFitAvailability();
       status(`エラー: ${LAYER_NAMES[name] || name} を表示できませんでした`);
       resolve(false);
     };
