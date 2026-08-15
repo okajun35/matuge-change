@@ -22,14 +22,17 @@ class FakeAssetRepository:
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
         self.similar_calls: list[dict[str, Any]] = []
+        self.page_calls: list[dict[str, Any]] = []
 
     def insert(self, record: dict[str, Any]) -> dict[str, Any]:
         row = {**record, "id": str(uuid.uuid4()), "created_at": "2026-01-01T00:00:00Z"}
         self.rows.append(row)
         return row
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self.rows[:limit]
+    def page(self, limit: int = 12, offset: int = 0, query: str = "") -> dict[str, Any]:
+        self.page_calls.append({"limit": limit, "offset": offset, "query": query})
+        rows = [r for r in self.rows if query.lower() in r["name"].lower()]
+        return {"items": rows[offset : offset + limit], "total": len(rows)}
 
     def get(self, asset_id: str) -> dict[str, Any] | None:
         return next((r for r in self.rows if r["id"] == asset_id), None)

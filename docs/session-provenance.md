@@ -53,6 +53,16 @@ data/<session_id>/
 - TDD: `tests/sessions/test_artifacts.py`（保存・履歴のドメインテスト）と
   `tests/api/test_sessions_api.py::TestRunHistoryApi`（API）を Red → Green の順で追加した。
 
+## カタログのページング
+
+商品が増えると一覧が縦に伸び、抽出結果（`#stage`）が画面下に押し出されていた。カタログを
+`<details>` で折りたたみ、サーバー側ページングと名前 / ブランド検索を入れた。
+
+- `GET /api/assets?limit=12&offset=0&q=` → `{"assets": [...], "total": n, "limit": ..., "offset": ...}`
+- ローカルは JSON インデックスを新しい順に並べて窓を切り出し、Supabase は
+  `select(count="exact").or_(name.ilike/brand.ilike).range(offset, offset+limit-1)`
+- UI は 12 件/ページ、前へ / 次へ、検索は 250ms デバウンス。末尾ページが空になったら 1 ページ戻る
+
 ## 今後（認証と Storage 移行）
 
 - 顔画像・AI 加工画像は機微データなので、Auth 導入時に所有者単位で `data/` 相当を分離し、

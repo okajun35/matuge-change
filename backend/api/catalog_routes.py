@@ -49,8 +49,9 @@ async def register_asset(
 
 
 @router.get("")
-async def list_assets(limit: int = 50):
-    return {"assets": container().catalog.list_assets(limit)}
+async def list_assets(limit: int = 12, offset: int = 0, q: str = ""):
+    page = container().catalog.list_assets(limit=limit, offset=offset, query=q)
+    return {"assets": page["items"], "total": page["total"], "limit": limit, "offset": offset}
 
 
 @router.get("/{asset_id}")

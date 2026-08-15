@@ -34,7 +34,27 @@ class TestLocalAssetRepository:
     def test_rows_survive_a_new_repository_instance(self, repository, tmp_path):
         repository.insert(record("a", [1.0, 0.0]))
         reopened = LocalAssetRepository(str(tmp_path / "assets"))
-        assert [r["name"] for r in reopened.list()] == ["a"]
+        assert [r["name"] for r in reopened.page()["items"]] == ["a"]
+
+    def test_page_returns_newest_first_with_total(self, repository):
+        for name in ("a", "b", "c"):
+            repository.insert(record(name, [1.0, 0.0]))
+        page = repository.page(limit=2, offset=0)
+        assert [r["name"] for r in page["items"]] == ["c", "b"]
+        assert page["total"] == 3
+
+    def test_page_offset_moves_the_window(self, repository):
+        for name in ("a", "b", "c"):
+            repository.insert(record(name, [1.0, 0.0]))
+        assert [r["name"] for r in repository.page(limit=2, offset=2)["items"]] == ["a"]
+
+    def test_page_query_filters_name_and_brand_case_insensitively(self, repository):
+        repository.insert(record("Volume D", [1.0, 0.0]))
+        repository.insert(record("Natural C", [1.0, 0.0]) | {"brand": "VOLUME lab"})
+        repository.insert(record("Flat J", [1.0, 0.0]))
+        page = repository.page(query="volume")
+        assert sorted(r["name"] for r in page["items"]) == ["Natural C", "Volume D"]
+        assert page["total"] == 2
 
     def test_get_returns_none_for_unknown_id(self, repository):
         assert repository.get("missing") is None

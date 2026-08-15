@@ -1,3 +1,6 @@
+import uuid
+
+
 class TestRegisterAsset:
     def test_registers_the_extracted_product(self, client, matted_session):
         res = client.post(
@@ -37,6 +40,34 @@ class TestBrowseCatalog:
 
     def test_unknown_asset_returns_404(self, client):
         assert client.get("/api/assets/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+class TestCatalogPaging:
+    def _register(self, client, session, name):
+        return client.post("/api/assets", data={"session_id": session, "name": name}).json()["id"]
+
+    def test_page_reports_total_limit_and_offset(self, client, matted_session):
+        for name in ("ページ1", "ページ2", "ページ3"):
+            self._register(client, matted_session, name)
+        body = client.get("/api/assets?limit=2&offset=0").json()
+        assert len(body["assets"]) == 2
+        assert body["total"] >= 3
+        assert body["limit"] == 2 and body["offset"] == 0
+
+    def test_second_page_differs_from_the_first(self, client, matted_session):
+        for name in ("めくり1", "めくり2", "めくり3"):
+            self._register(client, matted_session, name)
+        first = {a["id"] for a in client.get("/api/assets?limit=2&offset=0").json()["assets"]}
+        second = {a["id"] for a in client.get("/api/assets?limit=2&offset=2").json()["assets"]}
+        assert not (first & second)
+
+    def test_query_narrows_the_result(self, client, matted_session):
+        token = uuid.uuid4().hex[:8]
+        self._register(client, matted_session, f"検索ヒット-{token}")
+        self._register(client, matted_session, "対象外 フラット")
+        body = client.get(f"/api/assets?q={token}").json()
+        assert [a["name"] for a in body["assets"]] == [f"検索ヒット-{token}"]
+        assert body["total"] == 1
 
 
 class TestSimilarity:

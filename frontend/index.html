@@ -24,6 +24,11 @@
   #catalog { padding: 10px 16px; background: #26262e; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   #catalog input[type=text] { background: #1e1e24; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px; }
   #assetList { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+  #catalogPanel { background: #26262e; }
+  #catalogPanel > summary { cursor: pointer; padding: 8px 16px; font-size: 13px; color: #cfd; list-style: none; }
+  #catalogPanel > summary::before { content: '\25B8 '; }
+  #catalogPanel[open] > summary::before { content: '\25BE '; }
+  #assetPager { display: flex; gap: 8px; align-items: center; padding: 0 16px 12px; font-size: 13px; color: #9ab; }
   .asset { background: #2a2a33; border-radius: 6px; padding: 6px; width: 132px; font-size: 12px; }
   .asset img { width: 120px; height: 60px; object-fit: contain; display: block; }
   #tabs { display: flex; gap: 4px; padding: 8px 16px 0; background: #2a2a33; }
@@ -75,14 +80,24 @@
   <div id="progress"><div id="progressBar"></div></div>
 </div>
 
-<div id="catalog">
-  <label>商品名 <input type="text" id="assetName" placeholder="ボリュームラッシュ D 0.07"></label>
-  <label>ブランド <input type="text" id="assetBrand" placeholder="任意"></label>
-  <button id="btnRegister">この抽出結果を商品として登録</button>
-  <button id="btnRefreshAssets" class="secondary">カタログ更新</button>
-  <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
-</div>
-<div id="assetList"></div>
+<details id="catalogPanel">
+  <summary>商品カタログ <span id="catalogCount"></span></summary>
+  <div id="catalog">
+    <label>商品名 <input type="text" id="assetName" placeholder="ボリュームラッシュ D 0.07"></label>
+    <label>ブランド <input type="text" id="assetBrand" placeholder="任意"></label>
+    <button id="btnRegister">この抽出結果を商品として登録</button>
+    <span style="border-left:1px solid #555;height:24px"></span>
+    <label>検索 <input type="text" id="assetQuery" placeholder="商品名 / ブランド"></label>
+    <button id="btnRefreshAssets" class="secondary">カタログ更新</button>
+    <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
+  </div>
+  <div id="assetList"></div>
+  <div id="assetPager">
+    <button id="btnPrevPage" class="secondary">‹ 前へ</button>
+    <span id="pageInfo"></span>
+    <button id="btnNextPage" class="secondary">次へ ›</button>
+  </div>
+</details>
 <div id="status">画像をアップロードしてください。</div>
 
 <div id="stage">
@@ -120,7 +135,7 @@ function setMode(mode) {
   const still = mode === 'still';
   document.getElementById('tabStill').classList.toggle('tab-active', still);
   document.getElementById('tabVideo').classList.toggle('tab-active', !still);
-  for (const id of ['controls', 'catalog', 'assetList', 'status', 'stage'])
+  for (const id of ['controls', 'catalogPanel', 'status', 'stage'])
     document.getElementById(id).style.display = still ? '' : 'none';
   document.getElementById('videoMode').style.display = still ? 'none' : '';
 }
@@ -479,9 +494,18 @@ document.getElementById('btnMatte').onclick = async () => {
 
 const catalogInfo = (msg) => document.getElementById('catalogInfo').textContent = msg;
 
+const PAGE_SIZE = 12;
+const catalogPage = { offset: 0, query: '' };
+
 async function refreshAssets() {
   const list = document.getElementById('assetList');
-  const { assets } = await (await fetch('/api/assets')).json();
+  const params = new URLSearchParams({ limit: PAGE_SIZE, offset: catalogPage.offset });
+  if (catalogPage.query) params.set('q', catalogPage.query);
+  const { assets, total, offset } = await (await fetch(`/api/assets?${params}`)).json();
+  if (offset > 0 && assets.length === 0) {   // 末尾ページが空になったら戻す
+    catalogPage.offset = Math.max(0, offset - PAGE_SIZE);
+    return refreshAssets();
+  }
   list.innerHTML = '';
   for (const a of assets) {
     const card = document.createElement('div');
@@ -492,7 +516,13 @@ async function refreshAssets() {
     card.onclick = () => showSimilar(a.id, a.name);
     list.appendChild(card);
   }
-  catalogInfo(`${assets.length} 件`);
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const current = Math.floor(offset / PAGE_SIZE) + 1;
+  document.getElementById('pageInfo').textContent = `${current} / ${pages} ページ（全 ${total} 件）`;
+  document.getElementById('btnPrevPage').disabled = offset === 0;
+  document.getElementById('btnNextPage').disabled = offset + PAGE_SIZE >= total;
+  document.getElementById('catalogCount').textContent = `(${total} 件)`;
+  catalogInfo('');
 }
 
 async function showSimilar(assetId, name) {
@@ -514,7 +544,24 @@ document.getElementById('btnRegister').onclick = async () => {
   await refreshAssets();
   catalogInfo('商品として登録しました');
 };
-document.getElementById('btnRefreshAssets').onclick = refreshAssets;
+document.getElementById('btnRefreshAssets').onclick = () => { catalogPage.offset = 0; refreshAssets(); };
+document.getElementById('btnPrevPage').onclick = () => {
+  catalogPage.offset = Math.max(0, catalogPage.offset - PAGE_SIZE);
+  refreshAssets();
+};
+document.getElementById('btnNextPage').onclick = () => {
+  catalogPage.offset += PAGE_SIZE;
+  refreshAssets();
+};
+let queryTimer = null;
+document.getElementById('assetQuery').oninput = (e) => {
+  clearTimeout(queryTimer);
+  queryTimer = setTimeout(() => {
+    catalogPage.query = e.target.value.trim();
+    catalogPage.offset = 0;
+    refreshAssets();
+  }, 250);
+};
 
 (async () => {
   state.supabase = await connectRealtime();
