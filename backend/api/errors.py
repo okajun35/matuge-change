@@ -31,7 +31,9 @@ def to_http(error: Exception) -> HTTPException:
 
 
 def read_upload(file: UploadFile) -> np.ndarray:
-    img = cv2.imdecode(np.frombuffer(file.file.read(), np.uint8), cv2.IMREAD_COLOR)
+    buf = np.frombuffer(file.file.read(), np.uint8)
+    # 空バッファは cv2.imdecode が例外を投げる（同期途中・読み取り失敗のファイル）
+    img = cv2.imdecode(buf, cv2.IMREAD_COLOR) if buf.size else None
     if img is None:
         raise HTTPException(400, f"could not decode image: {file.filename}")
     return img
