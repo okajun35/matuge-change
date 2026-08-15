@@ -11,3 +11,7 @@ tests
 docs
 test_plan*.md
 *.mp4
+# Benchmark の生成データ・結果（数百MBになり、ビルドコンテキストを無駄に膨らませる）
+evaluation-data
+evaluation-results
+.bench-tmp

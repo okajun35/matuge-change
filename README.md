@@ -192,9 +192,31 @@ pre-commit run --all-files   # 手動で全ファイルにかける場合
 GitHub Actions（`.github/workflows/ci.yml`）で PR / main push 時に
 `ruff check` / `ruff format --check` と `pytest` が実行される。
 
+## 品質評価（Synthetic Benchmark）
+
+抽出・保持・再合成の品質を数値で測る環境が `evaluation/` にある。正解Mask/Alphaが既知の
+合成データを自動生成し、既存パイプラインをそのまま流して IoU / Dice / RGB fidelity /
+補間によるピクセル変質を測る（productionコードは変更しない）。
+
+```bash
+python scripts/generate_benchmark.py --cases 100 --clean          # データセット生成（外部データ不要）
+python scripts/run_evaluation.py --output evaluation-results      # 実行 → report.md / summary.csv
+```
+
+**数値は3層に分けて読む**（詳細は [evaluation/README.md](evaluation/README.md) §0）。
+
+- **A** コードパスの性質（補間・ROI縮小など）… 合成に依存しないので実写でもそのまま有効
+- **B** 相対・頑健性の傾向（どの条件で崩れるか）… 方向性は信頼できる
+- **C** 絶対スコア（Dice 等）… **実写性能を示さない。回帰検出の基準値としてのみ使う**
+
+目的・指標の定義・**合成データの限界**は [evaluation/README.md](evaluation/README.md)、
+現行mainの実測結果と見つかった問題は [docs/benchmark-findings.md](docs/benchmark-findings.md)。
+
 ## ドキュメント
 
 - [docs/handover.md](docs/handover.md) — 引き継ぎメモ（採用/却下した方式とその理由、既知の落とし穴、未検証事項）
+- [evaluation/README.md](evaluation/README.md) — Synthetic Benchmark（目的・生成方法・指標定義・限界）
+- [docs/benchmark-findings.md](docs/benchmark-findings.md) — Benchmarkで分かった現行アルゴリズムの課題と優先順位
 - [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
 - [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）
 - [docs/session-provenance.md](docs/session-provenance.md) — 元画像 / 合成元 / 合成結果と実行履歴のローカル保存

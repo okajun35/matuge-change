@@ -10,9 +10,11 @@ repos:
         args: [--maxkb=2048]
       - id: check-merge-conflict
 
+  # ruff のバージョンは requirements-dev.txt と .github/workflows/ci.yml と揃える。
+  # 揃っていないと手元で `ruff check` が通るのに CI だけ落ちる（規則が版で違う）。
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.9.6
+    rev: v0.16.3
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format

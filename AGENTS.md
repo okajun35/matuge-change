@@ -26,6 +26,14 @@ ruff format               # フォーマット
 pre-commit run --all-files
 ```
 
+ローカルに Python 環境を作らない場合は Docker で同じことができる（`Dockerfile.dev`）:
+
+```bash
+scripts/dev-docker.sh                                    # pytest
+scripts/dev-docker.sh ruff check
+scripts/dev-docker.sh python -m pytest tests/evaluation -q
+```
+
 ## プロジェクト構成
 
 - `backend/lash_extraction/` — 抽出ドメイン（landmark / ROI / alignment / evidence / matting）
@@ -41,9 +49,12 @@ pre-commit run --all-files
 - `frontend/extract.html` — 静止画モード（Canvasブラシ補正UI）
 - `frontend/video.html` — 動画モード
 - `frontend/common.css` — 3ページ共通スタイル
-- `tests/` — pytest（API + ドメイン）
+- `evaluation/` — Synthetic Benchmark（既存アルゴリズムの**計測専用**。`backend/` の挙動は変えない）
+- `scripts/` — CLI（`generate_benchmark.py` / `run_evaluation.py` / `dev-docker.sh`）
+- `tests/` — pytest（API + ドメイン + evaluation）
 - `models/face_landmarker.task` — MediaPipeモデル（コミットしない）
 - `data/` — セッションデータ（コミットしない）
+- `evaluation-data/` `evaluation-results/` — Benchmarkの入出力（コミットしない）
 
 ## 設計原則
 
@@ -61,6 +72,19 @@ pre-commit run --all-files
 - ズームは `#canvasWrap` の `transform: scale()`。ブラシ座標は `state.zoom` で割って画像座標へ戻す
 - レイヤー一覧の再構築でレイヤーを落とさない（再開時の `roi_b`、Matting再実行時の `composite_on_edited`）
 
+## Benchmark（`evaluation/`）のルール
+
+- **数値を良くするために production を変えない。** probability / matting / ROI / threshold /
+  evidence / alignment を触ってよいのは「アルゴリズムを改善する」PRだけで、計測PRでは触らない
+- 見つかった問題は修正せず `docs/benchmark-findings.md` に記録する
+- 合格ライン（Dice >= 0.9 等）は設けない。目的はベースラインの取得と回帰検出
+- **数値は A / B / C の層に分けて引用する**（`evaluation/README.md` §0）。
+  A=コードパスの性質（実写でも有効）、B=相対・頑健性の傾向、C=絶対スコア（回帰検出のみ）。
+  「本システムの精度は Dice 0.52」のような C 層の引用をしてはいけない
+- 合成データは実写性能を証明しない。甘い点・厳しい点は両方向にあり `evaluation/README.md` §8 に列挙
+- `warp_product(interpolation="linear", premultiply=False)` が本番 `recompose_onto` と
+  ビット一致することをテストで担保している。本番を変えたらこのテストが落ちる（＝計測対象のズレ検知）
+
 ## その他ルール
 
 - PRを作る前に `pytest` / `ruff check` / `pre-commit run --all-files` を全て通す
@@ -68,3 +92,7 @@ pre-commit run --all-files
 - 既存の静止画モードの機能は壊さない・削除しない
 - uvicorn は自動リロードしないので、ルート追加・pull後はサーバを再起動する（しないと404を誤診する）
 - `.venv` に ruff/pre-commit が無い環境では `uvx ruff check` / `uvx pre-commit run --all-files` を使う
+- **ruff のバージョンは3箇所で必ず揃える**: `requirements-dev.txt` / `.pre-commit-config.yaml` の `rev` /
+  `.github/workflows/ci.yml` の `version`（現在 0.16.3）。版によって規則が違うため、割れていると
+  手元の `ruff check` が通るのに CI だけ落ちる（実例: 0.9.6 のみ UP038 を出し、
+  `isinstance(x, (int, float))` を `int | float` に直させる）。上げるときは3箇所同時に上げる

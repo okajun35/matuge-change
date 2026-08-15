@@ -1,0 +1,40 @@
+# テスト・Benchmark 実行用イメージ（本番イメージ + 開発依存）。
+#
+# アプリのコードは COPY せずマウントして使う。ホスト側に .venv を作らずに
+# pytest / ruff / Synthetic Benchmark を回すためのもので、本番の Dockerfile とは
+# 独立している（docker-compose.yml のサービス構成には影響しない）。
+FROM python:3.11-slim
+
+# MediaPipe / OpenCV が要求する共有ライブラリと、H.264 再エンコード用の ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libegl1 \
+    libgl1 \
+    libgles2 \
+    libglib2.0-0 \
+    libgomp1 \
+    ffmpeg \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# MediaPipe Face Landmarker モデル（リポジトリにはコミットしない）。
+# リポジトリを /app にマウントすると隠れるので、scripts/dev-docker.sh が
+# このファイルをホストの models/ へ取り出してからマウントする。
+RUN curl -sL -o models/face_landmarker.task --create-dirs \
+    https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+
+# ホストのファイルを汚さないため、キャッシュはすべて /tmp に出す。
+# PYTHONPYCACHEPREFIX はマウントされたリポジトリ内の古い __pycache__ を無視するためにも要る。
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPYCACHEPREFIX=/tmp/pycache \
+    NUMBA_CACHE_DIR=/tmp/numba \
+    RUFF_CACHE_DIR=/tmp/ruff \
+    HOME=/tmp
+
+CMD ["python", "-m", "pytest"]

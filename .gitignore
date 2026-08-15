@@ -3,3 +3,12 @@ data/
 models/*.task
 __pycache__/
 *.pyc
+
+# Benchmark inputs and outputs: generated locally, never committed.
+# Background photos and product cut-outs stay out of the repository for licence reasons.
+evaluation-data/generated/
+evaluation-data/backgrounds/
+evaluation-data/products/*
+!evaluation-data/products/.gitkeep
+evaluation-results/
+.bench-tmp/
