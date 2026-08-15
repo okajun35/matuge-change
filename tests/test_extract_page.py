@@ -70,6 +70,16 @@ class TestRoiModeToggle:
         assert "dest_rect" in page
         assert "加工画像で ROI-B を指定してください" in page
 
+    def test_arming_roi_refreshes_button_and_hint_immediately(self):
+        page = _page()
+        assert "showLayer(target);\n  updateRoiHint();" in page
+        assert "state.activeRoi = null;\n  updateRoiHint();" in page
+        assert "roiModeSelect.onchange" in page and "updateRoiHint();" in page
+
+    def test_show_layer_keeps_layer_selector_in_sync(self):
+        page = _page()
+        assert "document.getElementById('layerSelect').value = name;" in page
+
 
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):

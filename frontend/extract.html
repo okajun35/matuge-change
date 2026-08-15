@@ -197,6 +197,7 @@ stage.addEventListener('wheel', (e) => {
 // 表示完了を待てるよう Promise を返す（ストローク再生はキャンバスのリサイズ後に行う必要がある）
 function showLayer(name) {
   state.layer = name;
+  document.getElementById('layerSelect').value = name;
   const local = isLocalLayer(name);
   if (!local && !state.session) return Promise.resolve(false);
   const src = local ? state.localUrls[name] : `/api/image/${state.session}/${name}?t=${Date.now()}`;
@@ -326,7 +327,7 @@ function armRoi(kind) {
   state.activeRoi = kind;
   setBrush(null, null);
   showLayer(target);
-  drawRoiOverlay();
+  updateRoiHint();
 }
 document.getElementById('roiBtnA').onclick = () => armRoi('a');
 document.getElementById('roiBtnB').onclick = () => armRoi('b');
