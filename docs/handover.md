@@ -104,7 +104,12 @@
 そのため横顔・目のアップは**ユーザーが矩形でROIを与える手動ROIモード**で扱う:
 
 - `POST /api/session` に `roi_rect="x0,y0,x1,y1"`（元画像ピクセル）を渡すと顔検出をスキップし、prior無しで暗部/差分evidenceをそのまま probability にする
-- `meta.json` の `mode` が `manual` / `auto`。`manual` で顔が検出できなかったセッションには `landmarks.npy` が無いので `/api/recompose` は 422 を返す（AI加工画像への貼り戻しは正面セッション限定）
+- 用語は **ROI-A = 装着画像から抽出する範囲**、**ROI-B = 加工画像へ貼り付ける先の矩形**。UIには解析後も押せる `ROI-A 指定（装着画像）` / `ROI-B 指定（加工画像）` ボタン、`ROIクリア`、`ROI枠を表示` チェックボックス（キーボード `H` でも切替）を置く。ROI-Aはシアン実線、ROI-Bはオレンジ破線で表示する
+- 解析後に結果レイヤーへ自動切替されると従来のROIドラッグ対象から外れ、さらにモードセレクタは既に `manual` のため `onchange` が発火せず、ROIを引き直せない不具合があった。ROI指定ボタンは適切な装着画像／加工画像レイヤーへ切り替えてドラッグをarmすることで、この落とし穴を避ける
+- `POST /api/recompose` に `dest_rect="x0,y0,x1,y1"`（加工画像ピクセル）を指定すると、顔検出・ランドマーク無しでROI-Bへ貼り付けられる。`product_rgba` は縦横比を維持してROI-Bに内接・中央配置し、アルファ前乗算してから拡縮する（ハロー防止）。回転・遠近変形には対応しない
+- `dest_rect` 無しの経路は従来のlandmark affineのままで、landmarkが無ければ422になる既存挙動も残っている。したがって横顔同士の貼り付けはlandmark経路では成立せず、ROI-Bの手動指定が必要
+- `meta.json` の `mode` が `manual` / `auto`。`dest_rect` は `meta.json` に保存され、セッション取得時に復元できる
+- 実測では、実写の横顔2枚に加えて、いただいたAI加工画像（横顔）もMediaPipeでは検出0件だった。横顔同士はlandmark経路では成立しないため、ROI-A抽出後はROI-Bを手動指定する
 - trimap / closed-form matting / 3値ブラシは向きに依存しないので、ROIが決まれば横顔でもそのまま動く
 - UIのデフォルトは自動。自動で `no face` エラーが返ったらエラー表示で止めず、手動ROIへ自動フォールバックして案内する（`fallbackToManualRoi`）
-- 正面画像に手動ROIを使うのも可。顔が検出できれば `eye_prior` と `landmarks.npy` は自動モードと同じく効くので、再合成も使える（手動ROIはROIの決め方だけを上書きする）
+- 正面画像に手動ROIを使うのも可。顔が検出できれば `eye_prior` と `landmarks.npy` は自動モードと同じく効くので、`dest_rect` を使わない再合成も使える（手動ROIはROIの決め方だけを上書きする）
