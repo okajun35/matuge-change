@@ -34,6 +34,19 @@ class TestRenderGeometry:
         assert opaque.any()
         assert bgr[opaque].std() > 1.0  # textured product, so RGB fidelity is measurable
 
+    def test_strand_colour_actually_reaches_the_buffer(self, geometry, background):
+        """The colour buffer is written through a sliced view, which is easy to misread
+        as the "assignment to a temporary copy" trap. It is not one: a basic slice is a
+        view. If that ever regresses, the product turns black and RGB fidelity is void.
+        """
+        bgr, alpha = synth.render_geometry(geometry, background.shape)
+        opaque = alpha > 0.9
+        assert bgr[opaque].max() > 0, "product pixels are black: the colour buffer was lost"
+        strand_colours = {strand.color for strand in geometry.strands}
+        assert tuple(int(v) for v in bgr[opaque].mean(axis=0).round()) != (0, 0, 0)
+        # every opaque pixel carries one of the strand colours, not an averaged smear
+        assert any(abs(bgr[opaque].mean() - sum(c) / 3) < 40 for c in strand_colours)
+
     def test_is_deterministic(self, background):
         a = synth.synthesize_lash(background.lash_line, seed=1)
         b = synth.synthesize_lash(background.lash_line, seed=1)

@@ -134,7 +134,11 @@ def _draw_segment(
     hit = patch > 0
     region = alpha[y0:y1, x0:x1]
     np.maximum(region, np.where(hit, np.float32(value), np.float32(0.0)), out=region)
-    color_buffer[y0:y1, x0:x1][hit] = color
+    # a basic slice is a view, so writing through the mask reaches `color_buffer`.
+    # Bound it to a name anyway: chained `buffer[slice][mask] = x` reads like the
+    # copy-then-discard trap it would be if the first index were fancy indexing.
+    color_region = color_buffer[y0:y1, x0:x1]
+    color_region[hit] = color
 
 
 def render_geometry(
