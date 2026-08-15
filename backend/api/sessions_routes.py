@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -13,18 +15,24 @@ from backend.strokes.constraints import decode_constraints_png
 router = APIRouter(prefix="/api")
 
 
-def _roi_rect(raw: str) -> tuple[float, float, float, float] | None:
-    """`"x0,y0,x1,y1"` in source-image pixels; empty means "locate the eyes automatically"."""
+def _rect(raw: str, name: str) -> tuple[float, float, float, float] | None:
+    """Parse a user-drawn rectangle; an empty value means it was not specified."""
     if not raw.strip():
         return None
     parts = raw.split(",")
     if len(parts) != 4:
-        raise HTTPException(400, "roi_rect must be 'x0,y0,x1,y1'")
+        raise HTTPException(400, f"{name} must be 'x0,y0,x1,y1'")
     try:
         x0, y0, x1, y1 = (float(p) for p in parts)
     except ValueError as exc:
-        raise HTTPException(400, "roi_rect must be four numbers") from exc
+        raise HTTPException(400, f"{name} must be four numbers") from exc
+    if not all(isfinite(v) for v in (x0, y0, x1, y1)):
+        raise HTTPException(400, f"{name} must be finite numbers")
     return x0, y0, x1, y1
+
+
+def _roi_rect(raw: str) -> tuple[float, float, float, float] | None:
+    return _rect(raw, "roi_rect")
 
 
 @router.post("/session")
@@ -82,6 +90,8 @@ async def get_session(session_id: str):
         "height": meta["height"],
         "has_bare": meta["has_bare"],
         "mode": meta.get("mode", "auto"),
+        "roi_rect": meta.get("roi"),
+        "dest_rect": meta.get("dest_rect"),
         "layers": [name for name in LAYER_ORDER if store.has_layer(session_id, name)],
     }
 
@@ -170,9 +180,11 @@ async def get_matte_job(job_id: str):
 async def recompose(
     session_id: str = Form(...),
     edited_image: UploadFile = File(...),
+    dest_rect: str = Form(""),
 ):
     try:
-        return container().sessions.recompose(session_id, read_upload(edited_image))
+        rect = _rect(dest_rect, "dest_rect")
+        return container().sessions.recompose(session_id, read_upload(edited_image), rect)
     except Exception as exc:
         raise to_http(exc) from exc
 

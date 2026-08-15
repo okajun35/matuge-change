@@ -156,6 +156,41 @@ class TestRecompose:
         assert res.status_code == 422
         assert "no face" in res.json()["detail"]
 
+    def test_manual_dest_rect_recompose_does_not_need_landmarks(self, fake_session):
+        os.remove(os.path.join(DATA_DIR, fake_session, "landmarks.npy"))
+        client.post("/api/matte", data={"session_id": fake_session})
+        edited = np.zeros((80, 100, 3), np.uint8)
+        res = client.post(
+            "/api/recompose",
+            data={"session_id": fake_session, "dest_rect": "10,20,90,60"},
+            files={"edited_image": ("e.png", encode_png(edited))},
+        )
+        assert res.status_code == 200
+        assert res.json()["dest_rect"] == [10, 20, 90, 60]
+        out = cv2.imread(
+            os.path.join(DATA_DIR, fake_session, "composite_on_edited.png"), cv2.IMREAD_UNCHANGED
+        )
+        assert out.shape[:2] == edited.shape[:2]
+
+    @pytest.mark.parametrize("dest_rect", ["1,2,3", "a,2,3,4"])
+    def test_manual_dest_rect_format_returns_400(self, fake_session, dest_rect):
+        client.post("/api/matte", data={"session_id": fake_session})
+        res = client.post(
+            "/api/recompose",
+            data={"session_id": fake_session, "dest_rect": dest_rect},
+            files={"edited_image": ("e.png", encode_png(np.zeros((80, 100, 3), np.uint8)))},
+        )
+        assert res.status_code == 400
+
+    def test_manual_dest_rect_too_small_returns_400(self, fake_session):
+        client.post("/api/matte", data={"session_id": fake_session})
+        res = client.post(
+            "/api/recompose",
+            data={"session_id": fake_session, "dest_rect": "1,2,3,20"},
+            files={"edited_image": ("e.png", encode_png(np.zeros((80, 100, 3), np.uint8)))},
+        )
+        assert res.status_code == 400
+
 
 class TestGetImage:
     def test_bad_layer_name_returns_400(self, fake_session):

@@ -56,6 +56,20 @@ class TestRoiModeToggle:
         assert "fallbackToManualRoi" in page
         assert "no face" in page
 
+    def test_manual_roi_a_and_b_controls_are_present(self):
+        page = _page()
+        for marker in ("roiBtnA", "roiBtnB", "roiClear", "roiShow"):
+            assert marker in page
+        assert "ROI-A 指定（装着画像）" in page
+        assert "ROI-B 指定（加工画像）" in page
+
+    def test_manual_roi_overlay_colors_and_recompose_dest_rect(self):
+        page = _page()
+        assert "#00e5ff" in page and "#ff9f1c" in page
+        assert "roiOverlayA" in page and "roiOverlayB" in page
+        assert "dest_rect" in page
+        assert "加工画像で ROI-B を指定してください" in page
+
 
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):

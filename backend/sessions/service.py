@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+import cv2
 import numpy as np
 
 from backend.lash_extraction import (
@@ -168,22 +169,67 @@ class SessionService:
         self.store.require(session_id)
         return self.store.load_runs(session_id)
 
-    def recompose(self, session_id: str, edited: np.ndarray) -> dict[str, Any]:
+    def recompose(
+        self,
+        session_id: str,
+        edited: np.ndarray,
+        dest_rect: tuple[float, float, float, float] | None = None,
+    ) -> dict[str, Any]:
         self.store.require(session_id)
         if not self.store.has_layer(session_id, "product_rgba"):
             raise MatteNotReady("run matting first")
+        self.store.save_image(session_id, "source_edited", edited)
+        rgba = self.store.load_image(session_id, "product_rgba", flags=-1)
+        if dest_rect is not None:
+            roi = manual_eye_roi(dest_rect, edited.shape)
+            out = self._recompose_into_rect(rgba, edited, roi)
+            self.store.save_image(session_id, "composite_on_edited", out)
+            meta = self.store.load_meta(session_id)
+            normalized = [roi.x0, roi.y0, roi.x1, roi.y1]
+            meta["dest_rect"] = normalized
+            self.store.save_meta(session_id, meta)
+            return {"layers": ["composite_on_edited"], "dest_rect": normalized}
         if not self.store.has_array(session_id, "landmarks"):
             raise FaceNotDetected(
                 "this session has no face landmarks (manual ROI): recompose needs a detected face"
             )
-        self.store.save_image(session_id, "source_edited", edited)
-        rgba = self.store.load_image(session_id, "product_rgba", flags=-1)
         lms_worn = self.store.load_array(session_id, "landmarks")
         out = recompose_onto(rgba, self.roi_of(session_id), lms_worn, edited)
         if out is None:
             raise FaceNotDetected("no face detected in the edited image")
         self.store.save_image(session_id, "composite_on_edited", out)
         return {"layers": ["composite_on_edited"]}
+
+    @staticmethod
+    def _recompose_into_rect(rgba: np.ndarray, edited: np.ndarray, roi: EyeRoi) -> np.ndarray:
+        """Fit BGRA product pixels into a destination rectangle without halos."""
+        target_w, target_h = roi.x1 - roi.x0, roi.y1 - roi.y0
+        src_h, src_w = rgba.shape[:2]
+        scale = min(target_w / src_w, target_h / src_h)
+        fit_w = max(1, round(src_w * scale))
+        fit_h = max(1, round(src_h * scale))
+
+        color = rgba[:, :, :3].astype(np.float32)
+        alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+        premultiplied = np.dstack((color * alpha[:, :, None], alpha))
+        interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LANCZOS4
+        resized = cv2.resize(premultiplied, (fit_w, fit_h), interpolation=interpolation)
+        resized_alpha = np.clip(resized[:, :, 3], 0, 1)
+        resized_color = np.zeros_like(resized[:, :, :3])
+        np.divide(
+            resized[:, :, :3],
+            resized_alpha[:, :, None],
+            out=resized_color,
+            where=resized_alpha[:, :, None] > 1e-6,
+        )
+
+        out = edited.astype(np.float32).copy()
+        x = roi.x0 + (target_w - fit_w) // 2
+        y = roi.y0 + (target_h - fit_h) // 2
+        background = out[y : y + fit_h, x : x + fit_w]
+        a = resized_alpha[:, :, None]
+        background[:] = resized_color * a + background * (1 - a)
+        return np.clip(out, 0, 255).astype(np.uint8)
 
     def roi_of(self, session_id: str) -> EyeRoi:
         meta = self.store.load_meta(session_id)

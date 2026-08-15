@@ -63,3 +63,35 @@ class TestRecomposeWithoutLandmarks:
         profile_service.store.save_image(sid, "product_rgba", np.zeros((140, 200, 4), np.uint8))
         with pytest.raises(FaceNotDetected):
             profile_service.recompose(sid, profile_image)
+
+    def test_dest_rect_recomposes_without_landmarks_and_preserves_aspect(
+        self, profile_service, profile_image
+    ):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((20, 40, 4), np.uint8)
+        product[:, :, 2] = 255
+        product[:, :, 3] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        result = profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240))
+
+        assert result["dest_rect"] == [100, 80, 300, 240]
+        out = profile_service.store.load_image(sid, "composite_on_edited")
+        assert out.shape == edited.shape
+        # 2:1 product fitted into a 200x160 rectangle => 200x100, centered.
+        assert np.all(out[110:210, 100:300, 2] > 200)
+        assert np.all(out[:110, :, 2] == 0)
+        assert np.all(out[210:, :, 2] == 0)
+        assert profile_service.store.load_meta(sid)["dest_rect"] == [100, 80, 300, 240]
+
+    def test_dest_rect_is_clipped_and_rejects_small_rect(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        profile_service.store.save_image(sid, "product_rgba", np.zeros((20, 40, 4), np.uint8))
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        profile_service.recompose(sid, edited, dest_rect=(-10, 80, 300, 400))
+        assert profile_service.store.load_meta(sid)["dest_rect"] == [0, 80, 300, 300]
+
+        with pytest.raises(ValueError, match="at least"):
+            profile_service.recompose(sid, edited, dest_rect=(1, 1, 10, 30))

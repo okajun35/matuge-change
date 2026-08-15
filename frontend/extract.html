@@ -13,7 +13,12 @@
   .brush-active { outline: 2px solid #ff5; }
   #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; width: 220px; }
   #progressBar { height: 100%; width: 0; background: #4a6cf7; transition: width .2s; }
-  #roiOverlay { position: absolute; display: none; border: 2px dashed #ff5; background: rgba(255,255,80,.12); pointer-events: none; }
+  .roi-overlay { position: absolute; display: none; pointer-events: none; box-sizing: border-box; }
+  #roiOverlayA { border: 2px solid #00e5ff; background: rgba(0,229,255,.12); }
+  #roiOverlayB { border: 2px dashed #ff9f1c; background: rgba(255,159,28,.12); }
+  .roi-overlay::before { position: absolute; left: 3px; top: 1px; font-weight: bold; }
+  #roiOverlayA::before { content: 'A'; color: #00e5ff; }
+  #roiOverlayB::before { content: 'B'; color: #ff9f1c; }
   #roiHint { font-size: 13px; color: #ffd; }
 </style>
 </head>
@@ -35,6 +40,12 @@
       <option value="manual">横顔・目のアップ（手動ROI）</option>
     </select>
   </label>
+  <span id="roiControls" style="display:none">
+    <button id="roiBtnA" class="secondary">ROI-A 指定（装着画像）</button>
+    <button id="roiBtnB" class="secondary">ROI-B 指定（加工画像）</button>
+    <button id="roiClear" class="secondary">ROIクリア</button>
+    <label><input type="checkbox" id="roiShow" checked> ROI枠を表示</label>
+  </span>
   <span id="roiHint"></span>
   <button id="btnUpload">② 解析開始</button>
   <label>セッションID <input type="text" id="sessionId" size="12" placeholder="作業を再開"></label>
@@ -70,7 +81,7 @@
   <button id="btnMatte">③ Matting実行</button>
   <span class="sep"></span>
   <label>編集済み画像: <input type="file" id="fileEdited" accept="image/*"></label>
-  <button id="btnRecompose">再合成</button>
+  <button id="btnRecompose">④ 再合成（顔検出で自動）</button>
   <a id="btnDownload" download><button class="secondary">表示中レイヤーを保存</button></a>
   <div id="progress"><div id="progressBar"></div></div>
 </div>
@@ -89,7 +100,8 @@
   <div id="canvasWrap">
     <canvas id="baseCanvas"></canvas>
     <canvas id="paintCanvas"></canvas>
-    <div id="roiOverlay"></div>
+    <div id="roiOverlayA" class="roi-overlay"></div>
+    <div id="roiOverlayB" class="roi-overlay"></div>
   </div>
 </div>
 
@@ -97,7 +109,7 @@
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
   strokes: [], current: null, supabase: null, channel: null,
-  zoom: 1, localUrls: {}, roiRect: null,
+  zoom: 1, localUrls: {}, roiRect: null, roiA: null, roiB: null, activeRoi: null,
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
@@ -244,36 +256,47 @@ registerLocalPreview('fileEdited', 'local_edited');
 
 // 横顔・目のアップは顔検出が効かないため、元画像上でドラッグした矩形を目元ROIとして送る
 const roiModeSelect = document.getElementById('roiMode');
-const roiOverlay = document.getElementById('roiOverlay');
+const roiControls = document.getElementById('roiControls');
+const roiOverlayA = document.getElementById('roiOverlayA');
+const roiOverlayB = document.getElementById('roiOverlayB');
+const roiShow = document.getElementById('roiShow');
 const isManualRoi = () => roiModeSelect.value === 'manual';
-// 矩形は装着画像の座標系なので、装着画像を等倍表示しているレイヤーの上でだけ扱う
-const isRoiLayer = (name) => name === 'local_with' || name === 'source_with';
+const roiFor = (kind) => kind === 'a' ? state.roiA : state.roiB;
+const isRoiLayer = (name, kind = state.activeRoi) => kind === 'a'
+  ? name === 'local_with' || name === 'source_with'
+  : name === 'local_edited' || name === 'source_edited';
 
 function drawRoiOverlay() {
-  const r = state.roiRect;
-  if (!r || !isManualRoi() || !isRoiLayer(state.layer)) {
-    roiOverlay.style.display = 'none';
-    return;
+  for (const [kind, overlay] of [['a', roiOverlayA], ['b', roiOverlayB]]) {
+    const r = roiFor(kind);
+    const visible = r && isManualRoi() && roiShow.checked && isRoiLayer(state.layer, kind);
+    overlay.style.display = visible ? 'block' : 'none';
+    if (visible) {
+      overlay.style.left = Math.min(r[0], r[2]) + 'px';
+      overlay.style.top = Math.min(r[1], r[3]) + 'px';
+      overlay.style.width = Math.abs(r[2] - r[0]) + 'px';
+      overlay.style.height = Math.abs(r[3] - r[1]) + 'px';
+    }
   }
-  roiOverlay.style.display = 'block';
-  roiOverlay.style.left = Math.min(r[0], r[2]) + 'px';
-  roiOverlay.style.top = Math.min(r[1], r[3]) + 'px';
-  roiOverlay.style.width = Math.abs(r[2] - r[0]) + 'px';
-  roiOverlay.style.height = Math.abs(r[3] - r[1]) + 'px';
 }
 
 function updateRoiHint() {
   const hint = document.getElementById('roiHint');
+  roiControls.style.display = isManualRoi() ? 'inline-flex' : 'none';
+  for (const [id, kind] of [['roiBtnA', 'a'], ['roiBtnB', 'b']])
+    document.getElementById(id).classList.toggle('brush-active', state.activeRoi === kind);
+  document.getElementById('btnUpload').textContent = isManualRoi() ? '② 解析開始（ROI-A）' : '② 解析開始';
+  document.getElementById('btnRecompose').textContent = isManualRoi()
+    ? '④ 再合成（ROI-Bへ貼付）' : '④ 再合成（顔検出で自動）';
   if (!isManualRoi()) { hint.textContent = ''; drawRoiOverlay(); return; }
-  const r = state.roiRect;
-  const base = r
-    ? `ROI ${Math.round(Math.abs(r[2] - r[0]))}×${Math.round(Math.abs(r[3] - r[1]))}px`
-    : '装着画像を表示して目元をドラッグして囲んでください';
+  const format = (r) => r
+    ? `${Math.round(Math.abs(r[2] - r[0]))}×${Math.round(Math.abs(r[3] - r[1]))}px`
+    : '未指定';
   // 手動ROIでは顔ランドマーク位置合わせができないので、未装着画像は同じ矩形で切り抜かれる
   const bareWarning = document.getElementById('fileWithout').files[0]
     ? '　⚠ 手動ROIでは未装着画像を位置合わせできません（同じ構図でないなら外してください）'
     : '';
-  hint.textContent = base + bareWarning;
+  hint.textContent = `ROI-A ${format(state.roiA)} ／ ROI-B ${format(state.roiB)}` + bareWarning;
   drawRoiOverlay();
 }
 roiModeSelect.onchange = () => {
@@ -289,6 +312,30 @@ function fallbackToManualRoi() {
   status('⚠ 顔を検出できませんでした（横顔・目のアップなど）。手動ROIに切り替えました。目元をドラッグして囲んだあと、もう一度「② 解析開始」を押してください。');
 }
 
+function armRoi(kind) {
+  if (!isManualRoi()) return;
+  state.activeRoi = kind;
+  setBrush(null, null);
+  const target = kind === 'a'
+    ? (state.localUrls.local_with ? 'local_with' : 'source_with')
+    : (state.localUrls.local_edited ? 'local_edited' : 'source_edited');
+  if (target && (state.localUrls[target] || state.session)) showLayer(target);
+  drawRoiOverlay();
+}
+document.getElementById('roiBtnA').onclick = () => armRoi('a');
+document.getElementById('roiBtnB').onclick = () => armRoi('b');
+document.getElementById('roiClear').onclick = () => {
+  state.roiA = null; state.roiB = null; state.roiRect = null;
+  state.activeRoi = null;
+  updateRoiHint();
+};
+roiShow.onchange = drawRoiOverlay;
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'h' || /input|textarea|select/i.test(e.target.tagName)) return;
+  roiShow.checked = !roiShow.checked;
+  drawRoiOverlay();
+});
+
 function imagePoint(e) {
   const rect = baseCanvas.getBoundingClientRect();
   return [(e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom];
@@ -296,21 +343,25 @@ function imagePoint(e) {
 
 let roiDragging = false;
 canvasWrap.addEventListener('pointerdown', (e) => {
-  if (!isManualRoi() || !isRoiLayer(state.layer)) return;
+  if (!isManualRoi() || !state.activeRoi || !isRoiLayer(state.layer, state.activeRoi)) return;
   const [x, y] = imagePoint(e);
-  state.roiRect = [x, y, x, y];
+  const rect = [x, y, x, y];
+  if (state.activeRoi === 'a') state.roiA = state.roiRect = rect;
+  else state.roiB = rect;
   roiDragging = true;
   updateRoiHint();
 });
 canvasWrap.addEventListener('pointermove', (e) => {
   if (!roiDragging) return;
   const [x, y] = imagePoint(e);
-  state.roiRect[2] = x; state.roiRect[3] = y;
+  const rect = state.activeRoi === 'a' ? state.roiA : state.roiB;
+  rect[2] = x; rect[3] = y;
   updateRoiHint();
 });
 window.addEventListener('pointerup', () => {
   if (!roiDragging) return;
   roiDragging = false;
+  state.activeRoi = null;
   updateRoiHint();
 });
 updateRoiHint();
@@ -369,8 +420,8 @@ document.getElementById('btnUpload').onclick = async () => {
   const fo = document.getElementById('fileWithout').files[0];
   if (fo) fd.append('image_without', fo);
   if (isManualRoi()) {
-    if (!state.roiRect) { status('レイヤーで「選択した画像 (装着)」を表示し、目元をドラッグしてROIを囲んでください'); return; }
-    fd.append('roi_rect', state.roiRect.map(Math.round).join(','));
+    if (!state.roiA) { status('ROI-A 指定を押して装着画像でROIを囲んでください'); return; }
+    fd.append('roi_rect', state.roiA.map(Math.round).join(','));
   }
   status(isManualRoi() ? '解析中…（手動ROI・差分計算）' : '解析中…（顔検出・位置合わせ・差分計算）');
   let data;
@@ -402,6 +453,8 @@ async function resumeSession(sid) {
   state.session = sid;
   state.w = data.width; state.h = data.height;
   roiModeSelect.value = data.mode === 'manual' ? 'manual' : 'auto';
+  state.roiA = data.roi_rect || null;
+  state.roiB = data.dest_rect || null;
   updateRoiHint();
   paintBackup = null;
   resetHistory();
@@ -524,12 +577,19 @@ document.getElementById('btnRecompose').onclick = async () => {
   if (!state.session) { status('まだセッションがありません。装着画像を選んで「解析開始」を押してください'); return; }
   const fe = document.getElementById('fileEdited').files[0];
   if (!fe) { status('編集済み画像を選択してください'); return; }
-  status('再合成中…（顔検出・位置合わせ・Alpha合成）');
+  if (isManualRoi() && !state.roiB) {
+    status('加工画像で ROI-B を指定してください');
+    armRoi('b');
+    return;
+  }
+  status(isManualRoi() ? '再合成中…（ROI-Bへ貼付）' : '再合成中…（顔検出・位置合わせ・Alpha合成）');
   const fd = new FormData();
   fd.append('session_id', state.session);
   fd.append('edited_image', fe);
+  if (isManualRoi() && state.roiB) fd.append('dest_rect', state.roiB.map(Math.round).join(','));
   try {
-    await postForm('/api/recompose', fd);
+    const result = await postForm('/api/recompose', fd);
+    if (result.dest_rect) state.roiB = result.dest_rect;
   } catch (e) {
     status('エラー: ' + e.message);
     return;
