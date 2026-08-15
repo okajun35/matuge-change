@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import cv2
 import numpy as np
@@ -26,6 +27,36 @@ class TestGetSession:
 
     def test_unknown_session_returns_404(self, client):
         assert client.get("/api/sessions/nope").status_code == 404
+
+
+class TestSessionArchiveApi:
+    """Supabase Storage への退避／復元。未設定ならローカル動作のまま 503 を返す。"""
+
+    def test_export_is_unavailable_without_supabase(self, client, session_id):
+        response = client.post(f"/api/sessions/{session_id}/archive")
+        assert response.status_code == 503
+        assert "supabase" in response.json()["detail"].lower()
+
+    def test_restore_is_unavailable_without_supabase(self, client):
+        assert client.post("/api/sessions/whatever/archive/restore").status_code == 503
+
+    def test_export_round_trips_through_the_archive(self, client, session_id, fake_archive):
+        exported = client.post(f"/api/sessions/{session_id}/archive")
+        assert exported.status_code == 200
+        assert "roi_a.png" in exported.json()["files"]
+
+        shutil.rmtree(os.path.join(DATA_DIR, session_id))
+        assert client.get(f"/api/sessions/{session_id}").status_code == 404
+
+        restored = client.post(f"/api/sessions/{session_id}/archive/restore")
+        assert restored.status_code == 200
+        assert client.get(f"/api/sessions/{session_id}").json()["layers"] == ["roi_a"]
+
+    def test_export_of_unknown_session_returns_404(self, client, fake_archive):
+        assert client.post("/api/sessions/nope/archive").status_code == 404
+
+    def test_restore_of_unknown_session_returns_404(self, client, fake_archive):
+        assert client.post("/api/sessions/nope/archive/restore").status_code == 404
 
 
 class TestRunHistoryApi:

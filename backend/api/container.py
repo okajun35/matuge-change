@@ -11,6 +11,7 @@ from backend.catalog.service import CatalogService
 from backend.infrastructure import supabase_gateway
 from backend.jobs.repository import InMemoryJobRepository, MirroringJobRepository
 from backend.jobs.runner import MatteJobRunner
+from backend.sessions.archive import SessionArchiveService
 from backend.sessions.service import SessionService
 from backend.sessions.store import SessionStore
 from backend.strokes.repository import FileStrokeRepository
@@ -27,6 +28,7 @@ class Container:
     catalog: CatalogService
     strokes: StrokeService
     jobs: MatteJobRunner
+    archive: SessionArchiveService
 
     @property
     def store(self) -> SessionStore:
@@ -44,15 +46,18 @@ def container() -> Container:
         )
         strokes = StrokeService(supabase_gateway.SupabaseStrokeRepository())
         jobs = MirroringJobRepository(InMemoryJobRepository(), supabase_gateway.SupabaseJobMirror())
+        session_archive = supabase_gateway.SupabaseSessionArchive()
     else:
         assets_dir = os.path.join(DATA_DIR, "assets")
         catalog = CatalogService(LocalAssetRepository(assets_dir), LocalAssetStorage(assets_dir))
         strokes = StrokeService(FileStrokeRepository(DATA_DIR))
         jobs = InMemoryJobRepository()
+        session_archive = None
 
     return Container(
         sessions=SessionService(store),
         catalog=catalog,
         strokes=strokes,
         jobs=MatteJobRunner(jobs),
+        archive=SessionArchiveService(store, session_archive),
     )

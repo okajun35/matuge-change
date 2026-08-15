@@ -22,6 +22,27 @@ data/<session_id>/
 
 `source_edited.png` は再合成の成否に関わらず保存する（顔検出に失敗した入力も残す）。
 
+## セッションの退避／取り込み（Supabase Storage）
+
+別マシン・別セッションへ作業を引き継ぐために、セッションディレクトリを丸ごと
+Supabase Storage の private bucket `sessions` へ退避できる（`<session_id>/<filename>`）。
+
+| エンドポイント | 動作 |
+| --- | --- |
+| `POST /api/sessions/<id>/archive` | `data/<id>/` の全ファイルを Storage へアップロード（upsert） |
+| `POST /api/sessions/<id>/archive/restore` | Storage の `<id>/` を `data/<id>/` へダウンロードして復元 |
+
+UI では静止画モードの「退避」「取り込み」ボタン（セッションID欄の隣）から実行でき、
+取り込み後はそのまま再開（レイヤー・ブラシストロークの復元）まで行う。
+
+設計上の約束:
+
+- Supabase 未設定でもアプリは従来どおり動く。退避系のみ 503（`ArchiveUnavailable`）を返す
+- 抽出ドメイン（`lash_extraction`）と `SessionStore` は Storage を知らない。
+  `backend/sessions/archive.py` の `SessionArchiveService` がポート越しに呼ぶだけ
+- Docker イメージにセッション画像を焼かない（イメージ肥大化と顔写真の混入を避ける）。
+  同一マシンでの永続化は `./data` のボリューム、マシンをまたぐ引き継ぎはこの退避機能を使う
+
 ## 実行履歴 `runs.json`
 
 `SessionService.run_matte()` が成功するたびに 1 件追記する。同期 API と非同期ジョブの

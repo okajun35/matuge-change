@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from fastapi import HTTPException, UploadFile
 
+from backend.sessions.archive import ArchiveUnavailable
 from backend.sessions.errors import (
     FaceNotDetected,
     ImageDecodeError,
@@ -15,6 +16,7 @@ from backend.sessions.errors import (
 
 STATUS_BY_ERROR = (
     (SessionNotFound, 404),
+    (ArchiveUnavailable, 503),
     (MatteNotReady, 409),
     (FaceNotDetected, 422),
     (ImageDecodeError, 400),

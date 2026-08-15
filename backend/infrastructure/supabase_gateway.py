@@ -13,6 +13,7 @@ from functools import lru_cache
 from typing import Any
 
 BUCKET = "product-assets"
+SESSION_BUCKET = "sessions"
 ASSET_LIST_COLUMNS = (
     "id,name,brand,session_id,storage_path,width,height,alpha_coverage,recon_error,created_at"
 )
@@ -57,6 +58,26 @@ class SupabaseAssetStorage:
 
     def download(self, path: str) -> bytes:
         return client().storage.from_(self._bucket).download(path)
+
+
+class SupabaseSessionArchive:
+    """セッションディレクトリ丸ごとの退避先（`<session_id>/<filename>`）。"""
+
+    def __init__(self, bucket: str = SESSION_BUCKET) -> None:
+        self._bucket = bucket
+
+    def upload(self, path: str, data: bytes) -> None:
+        content_type = "image/png" if path.endswith(".png") else "application/octet-stream"
+        client().storage.from_(self._bucket).upload(
+            path, data, {"content-type": content_type, "upsert": "true"}
+        )
+
+    def download(self, path: str) -> bytes:
+        return client().storage.from_(self._bucket).download(path)
+
+    def list(self, prefix: str) -> list[str]:
+        entries = client().storage.from_(self._bucket).list(prefix)
+        return sorted(f"{prefix}/{e['name']}" for e in entries if e.get("name"))
 
 
 class SupabaseAssetRepository:

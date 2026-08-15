@@ -30,6 +30,14 @@ class TestLocalPreview:
         assert "isLocalLayer" in page
 
 
+class TestSessionArchiveUi:
+    def test_archive_buttons_call_the_archive_endpoints(self):
+        page = _page()
+        assert "btnArchive" in page and "btnArchiveRestore" in page
+        assert "/archive'" in page or "/archive`" in page
+        assert "/archive/restore" in page
+
+
 class TestZoomableViewer:
     def test_stage_is_a_scrollable_viewport(self):
         page = _page()
