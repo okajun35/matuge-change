@@ -80,6 +80,27 @@ class TestRoiModeToggle:
         page = _page()
         assert "document.getElementById('layerSelect').value = name;" in page
 
+    def test_manual_fit_controls_exist(self):
+        page = _page()
+        for marker in ("btnFit", "fitCanvas", "fitScale", "fitAngle", "左右反転", "fitReset"):
+            assert marker in page
+
+    def test_fit_canvas_is_overlay_inside_canvas_wrap(self):
+        page = _page()
+        assert '<canvas id="fitCanvas"></canvas>' in page
+        assert page.index('<div id="canvasWrap">') < page.index('<canvas id="fitCanvas"></canvas>')
+        assert "fitCanvas.width = paintCanvas.width" not in page
+
+    def test_recompose_sends_angle_and_flip(self):
+        page = _page()
+        assert "fd.append('angle'" in page
+        assert "fd.append('flip'" in page
+
+    def test_fit_keyboard_shortcuts_skip_focused_inputs(self):
+        page = _page()
+        assert "/input|textarea|select/i.test(e.target.tagName)" in page
+        assert "fitMode" in page
+
 
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):

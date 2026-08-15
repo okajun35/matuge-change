@@ -184,6 +184,53 @@ class TestRecompose:
         )
         assert out.shape[:2] == edited.shape[:2]
 
+    def test_manual_recompose_response_contains_transform_metadata(self, fake_session):
+        client.post("/api/matte", data={"session_id": fake_session})
+        res = client.post(
+            "/api/recompose",
+            data={
+                "session_id": fake_session,
+                "dest_rect": "10,20,90,60",
+                "angle": "12.5",
+                "flip": "true",
+            },
+            files={"edited_image": ("e.png", encode_png(np.zeros((80, 100, 3), np.uint8)))},
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert {"dest_rect", "angle", "flip", "product_bbox"} <= body.keys()
+
+    def test_session_response_contains_persisted_transform_metadata(self, fake_session):
+        meta_path = os.path.join(DATA_DIR, fake_session, "meta.json")
+        with open(meta_path) as f:
+            meta = json.load(f)
+        meta.update({"dest_angle": 7.5, "dest_flip": True, "product_bbox": [1, 2, 3, 4]})
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+        body = client.get(f"/api/sessions/{fake_session}").json()
+        assert body["dest_angle"] == 7.5
+        assert body["dest_flip"] is True
+        assert body["product_bbox"] == [1, 2, 3, 4]
+
+    @pytest.mark.parametrize("data", [{"angle": "200"}, {"angle": "nan"}])
+    def test_manual_recompose_rejects_invalid_angle(self, fake_session, data):
+        client.post("/api/matte", data={"session_id": fake_session})
+        res = client.post(
+            "/api/recompose",
+            data={"session_id": fake_session, "dest_rect": "10,20,90,60", **data},
+            files={"edited_image": ("e.png", encode_png(np.zeros((80, 100, 3), np.uint8)))},
+        )
+        assert res.status_code == 400
+
+    def test_transform_without_dest_rect_returns_400(self, fake_session):
+        client.post("/api/matte", data={"session_id": fake_session})
+        res = client.post(
+            "/api/recompose",
+            data={"session_id": fake_session, "angle": "10"},
+            files={"edited_image": ("e.png", encode_png(np.zeros((80, 100, 3), np.uint8)))},
+        )
+        assert res.status_code == 400
+
     @pytest.mark.parametrize("dest_rect", ["1,2,3", "a,2,3,4"])
     def test_manual_dest_rect_format_returns_400(self, fake_session, dest_rect):
         client.post("/api/matte", data={"session_id": fake_session})

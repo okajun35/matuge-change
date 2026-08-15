@@ -58,6 +58,102 @@ class TestCreateWithManualRoi:
 
 
 class TestRecomposeWithoutLandmarks:
+    def test_product_bbox_is_saved_after_matting(self, profile_service, profile_image, monkeypatch):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        alpha = np.zeros((140, 200), np.float64)
+        alpha[30:90, 50:150] = 1.0
+        monkeypatch.setattr(
+            service_module,
+            "run_matting",
+            lambda roi, trimap: (alpha, np.zeros((*alpha.shape, 3), np.float64)),
+        )
+
+        profile_service.run_matte(sid, None)
+
+        assert profile_service.store.load_meta(sid)["product_bbox"] == [50, 30, 150, 90]
+
+    def test_recompose_uses_alpha_bbox_as_fit_basis(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((100, 100, 4), np.uint8)
+        product[30:70, 20:80, 2] = 255
+        product[30:70, 20:80, 3] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240))
+
+        out = profile_service.store.load_image(sid, "composite_on_edited")
+        ys, xs = np.where(out[:, :, 2] > 200)
+        assert xs.max() - xs.min() + 1 in range(195, 206)
+        assert ys.max() - ys.min() + 1 in range(128, 138)
+        assert abs((xs.min() + xs.max()) / 2 - 200) <= 2
+        assert abs((ys.min() + ys.max()) / 2 - 160) <= 2
+
+    def test_angle_90_swaps_fitted_bbox_dimensions(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((100, 100, 4), np.uint8)
+        product[30:70, 20:80, 2:] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240), angle=90)
+
+        out = profile_service.store.load_image(sid, "composite_on_edited")
+        ys, xs = np.where(out[:, :, 2] > 200)
+        assert xs.max() - xs.min() + 1 < ys.max() - ys.min() + 1
+
+    def test_flip_true_reverses_product_horizontally(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((20, 40, 4), np.uint8)
+        product[:, :20, 0] = 20
+        product[:, 20:, 0] = 220
+        product[:, :, 3] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 180), flip=True)
+        out = profile_service.store.load_image(sid, "composite_on_edited")
+
+        assert out[120, 110, 0] > out[120, 290, 0]
+
+    def test_default_angle_keeps_centered_aspect_fit(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((20, 40, 4), np.uint8)
+        product[:, :, 2:] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        result = profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240))
+
+        assert result["angle"] == 0.0
+        assert result["flip"] is False
+
+    @pytest.mark.parametrize("angle", [200, float("nan")])
+    def test_angle_validation_rejects_out_of_range_or_nonfinite(self, profile_service, profile_image, angle):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        profile_service.store.save_image(sid, "product_rgba", np.zeros((20, 40, 4), np.uint8))
+
+        with pytest.raises(ValueError):
+            profile_service.recompose(sid, profile_image, dest_rect=(20, 20, 100, 100), angle=angle)
+
+    def test_angle_without_dest_rect_is_rejected(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        profile_service.store.save_image(sid, "product_rgba", np.zeros((20, 40, 4), np.uint8))
+
+        with pytest.raises(ValueError):
+            profile_service.recompose(sid, profile_image, angle=10)
+
+    def test_empty_alpha_falls_back_to_full_product_rect(self, profile_service, profile_image):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((20, 40, 4), np.uint8)
+        product[:, :, 2:] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240))
+
+        assert profile_service.store.has_layer(sid, "composite_on_edited")
+
     def test_reports_that_the_session_has_no_landmarks(self, profile_service, profile_image):
         sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
         profile_service.store.save_image(sid, "product_rgba", np.zeros((140, 200, 4), np.uint8))

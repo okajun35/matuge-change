@@ -35,6 +35,26 @@ def _roi_rect(raw: str) -> tuple[float, float, float, float] | None:
     return _rect(raw, "roi_rect")
 
 
+def _transform_angle(raw: str) -> float | None:
+    if not raw.strip():
+        return None
+    try:
+        angle = float(raw)
+    except ValueError as exc:
+        raise HTTPException(400, "angle must be a finite number between -180 and 180") from exc
+    if not isfinite(angle) or not -180 <= angle <= 180:
+        raise HTTPException(400, "angle must be a finite number between -180 and 180")
+    return angle
+
+
+def _transform_flip(raw: str) -> bool | None:
+    if not raw.strip():
+        return None
+    if raw not in {"true", "false"}:
+        raise HTTPException(400, "flip must be 'true' or 'false'")
+    return raw == "true"
+
+
 @router.post("/session")
 async def create_session(
     image_with: UploadFile = File(...),
@@ -92,6 +112,9 @@ async def get_session(session_id: str):
         "mode": meta.get("mode", "auto"),
         "roi_rect": meta.get("roi"),
         "dest_rect": meta.get("dest_rect"),
+        "dest_angle": meta.get("dest_angle", 0.0),
+        "dest_flip": meta.get("dest_flip", False),
+        "product_bbox": meta.get("product_bbox"),
         "layers": [name for name in LAYER_ORDER if store.has_layer(session_id, name)],
     }
 
@@ -181,10 +204,22 @@ async def recompose(
     session_id: str = Form(...),
     edited_image: UploadFile = File(...),
     dest_rect: str = Form(""),
+    angle: str = Form(""),
+    flip: str = Form(""),
 ):
     try:
         rect = _rect(dest_rect, "dest_rect")
-        return container().sessions.recompose(session_id, read_upload(edited_image), rect)
+        parsed_angle = _transform_angle(angle)
+        parsed_flip = _transform_flip(flip)
+        if rect is None and (parsed_angle is not None or parsed_flip is not None):
+            raise HTTPException(400, "angle and flip require dest_rect")
+        return container().sessions.recompose(
+            session_id,
+            read_upload(edited_image),
+            rect,
+            parsed_angle or 0.0,
+            parsed_flip or False,
+        )
     except Exception as exc:
         raise to_http(exc) from exc
 
