@@ -63,7 +63,7 @@ data/<session_id>/
   `select(count="exact").or_(name.ilike/brand.ilike).range(offset, offset+limit-1)`
 - UI は 12 件/ページ、前へ / 次へ、検索は 250ms デバウンス。末尾ページが空になったら 1 ページ戻る
 - 画面は `#/extract`（静止画）/ `#/video` / `#/catalog` の3ルート。`frontend/router.js` に DOM を
-  触らない `parseRoute` / `hashFor` / `panelVisibility` を切り出し、`node --test tests/frontend/router.test.js` で
+  触らない `parseRoute` / `hashFor` / `panelVisibility` を切り出し、`node --test tests/frontend` で
   テストする（未知のハッシュは `#/extract` へフォールバック）。SPA のままなので session_id や
   Canvas の状態はタブを跨いでも保持され、ブラウザの戻る / 進むも効く。
 
