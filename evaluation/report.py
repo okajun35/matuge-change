@@ -35,7 +35,7 @@ HEADLINE = (
 
 
 def _mean(rows: Sequence[dict[str, Any]], key: str) -> float:
-    values = [row[key] for row in rows if isinstance(row.get(key), (int, float))]
+    values = [row[key] for row in rows if isinstance(row.get(key), int | float)]
     finite = [float(v) for v in values if not np.isnan(float(v))]
     return float(np.mean(finite)) if finite else float("nan")
 
@@ -94,7 +94,7 @@ def summarise(
 
 def _rounded(row: dict[str, Any], key: str) -> float | None:
     value = row.get(key)
-    if not isinstance(value, (int, float)) or np.isnan(float(value)):
+    if not isinstance(value, int | float) or np.isnan(float(value)):
         return None
     return round(float(value), 4)
 
@@ -158,6 +158,21 @@ def render_markdown(summary: dict[str, Any]) -> str:
         "  see `evaluation/README.md` for what synthetic data cannot reproduce.",
         "- binarisation threshold: `alpha >= 0.5`. `*_ex_own` excludes the model's own",
         "  lashes, which the pipeline is meant to pick up but which are not the product.",
+        "",
+        "### How to quote these numbers (`evaluation/README.md` §0)",
+        "",
+        "| table | layer | how far it carries |",
+        "| --- | --- | --- |",
+        "| Overall / By condition / Best-worst | **C** absolute score, **B** relative trend |"
+        " absolute values are a regression baseline only — never quote them as the system's"
+        " accuracy. The *ranking* of conditions is trustworthy |",
+        "| Pixel mutation / ROI downscale | **A** property of the production code path |"
+        " holds for real photos too; actionable as-is |",
+        "",
+        "Ground truth here is per-strand alpha covering only a few percent of the frame, so a"
+        " one-pixel spill halves precision. Read `reconstruction_error` and"
+        " `cases/*/comparison_*.png` next to the scores: the gap between them is the gap"
+        " between per-strand agreement and what a human sees.",
         "",
         "## Overall",
         "",

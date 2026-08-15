@@ -10,13 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # version は requirements-dev.txt / .pre-commit-config.yaml と揃える
       - uses: astral-sh/ruff-action@v3
         with:
-          version: 0.9.6
+          version: 0.16.3
           args: check
       - uses: astral-sh/ruff-action@v3
         with:
-          version: 0.9.6
+          version: 0.16.3
           args: format --check
 
   test:

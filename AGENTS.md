@@ -78,7 +78,10 @@ scripts/dev-docker.sh python -m pytest tests/evaluation -q
   evidence / alignment を触ってよいのは「アルゴリズムを改善する」PRだけで、計測PRでは触らない
 - 見つかった問題は修正せず `docs/benchmark-findings.md` に記録する
 - 合格ライン（Dice >= 0.9 等）は設けない。目的はベースラインの取得と回帰検出
-- 合成データは実写性能を証明しない。限界は `evaluation/README.md` §8 に書いてある
+- **数値は A / B / C の層に分けて引用する**（`evaluation/README.md` §0）。
+  A=コードパスの性質（実写でも有効）、B=相対・頑健性の傾向、C=絶対スコア（回帰検出のみ）。
+  「本システムの精度は Dice 0.52」のような C 層の引用をしてはいけない
+- 合成データは実写性能を証明しない。甘い点・厳しい点は両方向にあり `evaluation/README.md` §8 に列挙
 - `warp_product(interpolation="linear", premultiply=False)` が本番 `recompose_onto` と
   ビット一致することをテストで担保している。本番を変えたらこのテストが落ちる（＝計測対象のズレ検知）
 
@@ -89,3 +92,7 @@ scripts/dev-docker.sh python -m pytest tests/evaluation -q
 - 既存の静止画モードの機能は壊さない・削除しない
 - uvicorn は自動リロードしないので、ルート追加・pull後はサーバを再起動する（しないと404を誤診する）
 - `.venv` に ruff/pre-commit が無い環境では `uvx ruff check` / `uvx pre-commit run --all-files` を使う
+- **ruff のバージョンは3箇所で必ず揃える**: `requirements-dev.txt` / `.pre-commit-config.yaml` の `rev` /
+  `.github/workflows/ci.yml` の `version`（現在 0.16.3）。版によって規則が違うため、割れていると
+  手元の `ruff check` が通るのに CI だけ落ちる（実例: 0.9.6 のみ UP038 を出し、
+  `isinstance(x, (int, float))` を `int | float` に直させる）。上げるときは3箇所同時に上げる

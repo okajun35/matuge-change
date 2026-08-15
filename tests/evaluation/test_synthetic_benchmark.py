@@ -138,6 +138,10 @@ class TestRunnerAndReport:
         assert "Dice" in text and "IoU" in text and "Precision" in text and "Recall" in text
         assert "worn_only/auto" in text
         assert "do **not** prove real-world quality" in text
+        # a reader who only ever sees report.md must still learn which numbers carry over
+        assert "How to quote these numbers" in text
+        assert "regression baseline only" in text
+        assert "property of the production code path" in text
 
         output = str(tmp_path / "out")
         report.write_report(output, rows, summary)

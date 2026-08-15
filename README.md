@@ -203,6 +203,12 @@ python scripts/generate_benchmark.py --cases 100 --clean          # データセ
 python scripts/run_evaluation.py --output evaluation-results      # 実行 → report.md / summary.csv
 ```
 
+**数値は3層に分けて読む**（詳細は [evaluation/README.md](evaluation/README.md) §0）。
+
+- **A** コードパスの性質（補間・ROI縮小など）… 合成に依存しないので実写でもそのまま有効
+- **B** 相対・頑健性の傾向（どの条件で崩れるか）… 方向性は信頼できる
+- **C** 絶対スコア（Dice 等）… **実写性能を示さない。回帰検出の基準値としてのみ使う**
+
 目的・指標の定義・**合成データの限界**は [evaluation/README.md](evaluation/README.md)、
 現行mainの実測結果と見つかった問題は [docs/benchmark-findings.md](docs/benchmark-findings.md)。
 
