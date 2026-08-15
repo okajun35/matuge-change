@@ -28,10 +28,12 @@ class TestDockerfile:
         assert "requirements.txt" in text
         assert "face_landmarker.task" in text
 
-    def test_serves_the_app_on_8000(self):
+    def test_serves_the_app_on_configured_port(self):
         text = _read("Dockerfile")
-        assert "8000" in text
         assert "backend.app:app" in text
+        assert "--host 0.0.0.0" in text
+        # Render injects PORT (normally 10000); local Docker keeps using 8000.
+        assert "${PORT:-8000}" in text
 
     def test_dockerignore_excludes_local_state(self):
         ignored = _read(".dockerignore").split()
