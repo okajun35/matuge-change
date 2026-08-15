@@ -20,6 +20,9 @@ Alpha Matte として抽出し、後段の AI モデル加工画像へ再合成�
 
 詳細は [docs/supabase-phase-b.md](docs/supabase-phase-b.md)。
 
+アップロードした元画像・AI 加工済み画像・合成結果と Matting 実行履歴（`runs.json`）は
+セッションディレクトリに残る（[docs/session-provenance.md](docs/session-provenance.md)）。
+
 ## 動画モード
 
 顔固定・まばたき動画向けの「目元領域まるごと差し替え方式」（[docs/video-approach.md](docs/video-approach.md)）。
@@ -63,6 +66,7 @@ GitHub Actions（`.github/workflows/ci.yml`）で PR / main push 時に
 
 - [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
 - [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）
+- [docs/session-provenance.md](docs/session-provenance.md) — 元画像 / 合成元 / 合成結果と実行履歴のローカル保存
 
 ## 起動
 

@@ -89,7 +89,9 @@ function setLayerOptions(layers) {
     roi_a: 'Original (装着)', roi_b: 'Aligned (未装着)', difference: 'Difference',
     probability: 'Probability', trimap: 'Trimap', alpha: 'Alpha',
     product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成',
-    composite_on_edited: '編集済み画像へ再合成'
+    composite_on_edited: '編集済み画像へ再合成',
+    source_with: '元画像 (装着)', source_without: '元画像 (未装着)',
+    source_edited: '元画像 (AI加工済み)'
   };
   const sel = document.getElementById('layerSelect');
   const current = sel.value;

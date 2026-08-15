@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -59,6 +60,10 @@ class SessionService:
         prob = initial_probability(evidence, eye_prior(roi_a.shape, lms_a, roi))
 
         session_id = self.store.create()
+        # the uploads themselves are kept so a session can be re-derived later
+        self.store.save_image(session_id, "source_with", img_a)
+        if img_b is not None:
+            self.store.save_image(session_id, "source_without", img_b)
         self.store.save_image(session_id, "roi_a", roi_a)
         if roi_b is not None:
             self.store.save_image(session_id, "roi_b", roi_b)
@@ -120,16 +125,33 @@ class SessionService:
             self.store.save_image(session_id, "composite_on_bare", composite(alpha, fg, roi_b))
             layers.append("composite_on_bare")
 
+        error = reconstruction_error(alpha, fg, roi_a)
+        self.store.append_run(
+            session_id,
+            {
+                "created_at": datetime.now(UTC).isoformat(),
+                "params": {
+                    "fg_thresh": fg_thresh,
+                    "bg_thresh": bg_thresh,
+                    "unknown_band_px": unknown_band_px,
+                },
+                "reconstruction_error": error,
+                "layers": layers,
+            },
+        )
+
         report(100, "done")
-        return {
-            "layers": layers,
-            "reconstruction_error": reconstruction_error(alpha, fg, roi_a),
-        }
+        return {"layers": layers, "reconstruction_error": error}
+
+    def runs(self, session_id: str) -> list[dict[str, Any]]:
+        self.store.require(session_id)
+        return self.store.load_runs(session_id)
 
     def recompose(self, session_id: str, edited: np.ndarray) -> dict[str, Any]:
         self.store.require(session_id)
         if not self.store.has_layer(session_id, "product_rgba"):
             raise MatteNotReady("run matting first")
+        self.store.save_image(session_id, "source_edited", edited)
         rgba = self.store.load_image(session_id, "product_rgba", flags=-1)
         lms_worn = self.store.load_array(session_id, "landmarks")
         out = recompose_onto(rgba, self.roi_of(session_id), lms_worn, edited)

@@ -46,6 +46,9 @@ LAYER_ORDER = (
     "product_rgba",
     "composite_on_bare",
     "composite_on_edited",
+    "source_with",
+    "source_without",
+    "source_edited",
 )
 
 
@@ -64,6 +67,14 @@ async def get_session(session_id: str):
         "has_bare": meta["has_bare"],
         "layers": [name for name in LAYER_ORDER if store.has_layer(session_id, name)],
     }
+
+
+@router.get("/sessions/{session_id}/runs")
+async def get_runs(session_id: str):
+    try:
+        return {"runs": container().sessions.runs(session_id)}
+    except Exception as exc:
+        raise to_http(exc) from exc
 
 
 @router.post("/matte")

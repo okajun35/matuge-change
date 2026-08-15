@@ -55,6 +55,19 @@ class SessionStore:
     def load_array(self, session_id: str, name: str) -> np.ndarray:
         return np.load(self.path(session_id, f"{name}.npy"))
 
+    def append_run(self, session_id: str, run: dict[str, Any]) -> None:
+        runs = self.load_runs(session_id)
+        runs.append(run)
+        with open(self.path(session_id, "runs.json"), "w") as f:
+            json.dump(runs, f)
+
+    def load_runs(self, session_id: str) -> list[dict[str, Any]]:
+        path = self.path(session_id, "runs.json")
+        if not os.path.exists(path):
+            return []
+        with open(path) as f:
+            return json.load(f)
+
     def save_meta(self, session_id: str, meta: dict[str, Any]) -> None:
         with open(self.path(session_id, "meta.json"), "w") as f:
             json.dump(meta, f)
