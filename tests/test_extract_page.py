@@ -48,6 +48,14 @@ class TestRoiModeToggle:
         # 解析前のローカルプレビュー上でドラッグしてROIを決める
         assert "roiOverlay" in page
 
+    def test_auto_mode_defaults_and_falls_back_to_manual_when_no_face_is_found(self):
+        page = _page()
+        # デフォルトは自動（selectの先頭がauto）
+        assert page.index('value="auto"') < page.index('value="manual"')
+        # 顔検出できなかったときはエラーで止めず、手動ROIへ切り替えて案内する
+        assert "fallbackToManualRoi" in page
+        assert "no face" in page
+
 
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):

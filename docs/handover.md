@@ -106,3 +106,5 @@
 - `POST /api/session` に `roi_rect="x0,y0,x1,y1"`（元画像ピクセル）を渡すと顔検出をスキップし、prior無しで暗部/差分evidenceをそのまま probability にする
 - `meta.json` の `mode` が `manual` / `auto`。`manual` で顔が検出できなかったセッションには `landmarks.npy` が無いので `/api/recompose` は 422 を返す（AI加工画像への貼り戻しは正面セッション限定）
 - trimap / closed-form matting / 3値ブラシは向きに依存しないので、ROIが決まれば横顔でもそのまま動く
+- UIのデフォルトは自動。自動で `no face` エラーが返ったらエラー表示で止めず、手動ROIへ自動フォールバックして案内する（`fallbackToManualRoi`）
+- 正面画像に手動ROIを使うのも可。顔が検出できれば `eye_prior` と `landmarks.npy` は自動モードと同じく効くので、再合成も使える（手動ROIはROIの決め方だけを上書きする）

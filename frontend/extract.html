@@ -282,6 +282,13 @@ roiModeSelect.onchange = () => {
   updateRoiHint();
 };
 
+function fallbackToManualRoi() {
+  roiModeSelect.value = 'manual';
+  if (state.localUrls.local_with) showLayer('local_with');
+  updateRoiHint();
+  status('⚠ 顔を検出できませんでした（横顔・目のアップなど）。手動ROIに切り替えました。目元をドラッグして囲んだあと、もう一度「② 解析開始」を押してください。');
+}
+
 function imagePoint(e) {
   const rect = baseCanvas.getBoundingClientRect();
   return [(e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom];
@@ -370,6 +377,8 @@ document.getElementById('btnUpload').onclick = async () => {
   try {
     data = await postForm('/api/session', fd);
   } catch (e) {
+    // 横顔・目のアップで顔検出が失敗するのは想定内。行き止まりにせず手動ROIに誘導する
+    if (!isManualRoi() && /no face/.test(e.message)) { fallbackToManualRoi(); return; }
     status('エラー: ' + e.message);
     return;
   }
