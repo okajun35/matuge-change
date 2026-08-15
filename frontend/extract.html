@@ -117,7 +117,7 @@
 <div class="bar" id="viewBar">
   <label>表示:
     <select id="layerSelect">
-      <option value="roi_a">Original (装着)</option>
+      <option value="" disabled selected>（画像を選ぶとプレビューできます）</option>
     </select>
   </label>
   <label>ズーム:
@@ -142,7 +142,7 @@
 
 <script>
 const state = {
-  session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
+  session: null, w: 0, h: 0, brush: null, painting: false, layer: '',
   strokes: [], current: null, supabase: null, channel: null,
   zoom: 1, localUrls: {}, roiA: null, roiB: null, activeRoi: null,
   fitMode: false, fitScale: 100, fitAngle: 0, fitFlip: false,
@@ -172,31 +172,60 @@ async function postForm(url, fd) {
   return res.json();
 }
 
+// 「Original」は装着画像を指すが未装着と誤読されるため、何の画像でどう使うかを名前に入れる
 const LAYER_NAMES = {
-  roi_a: 'Original (装着)', roi_b: 'Aligned (未装着)', difference: 'Difference',
-  probability: 'Probability', trimap: 'Trimap', alpha: 'Alpha',
-  product_rgba: 'Product RGBA', composite_on_bare: '未装着画像へ再合成',
-  composite_on_edited: '編集済み画像へ再合成',
-  source_with: '元画像 (装着)', source_without: '元画像 (未装着)',
-  source_edited: '元画像 (AI加工済み)',
-  local_with: '選択した画像 (装着)', local_without: '選択した画像 (未装着)',
-  local_edited: '選択した画像 (AI加工済み)'
+  roi_a: '目元ROI：装着（抽出元）', roi_b: '目元ROI：未装着（位置合わせ済み）',
+  difference: 'Difference：装着と未装着の差分', probability: 'Probability：まつ毛らしさ',
+  trimap: 'Trimap：＋商品／？中間／−背景', alpha: 'Alpha：透過率',
+  product_rgba: 'Product RGBA：商品の透過PNG',
+  composite_on_bare: '再合成：未装着画像へ', composite_on_edited: '再合成：AI加工画像へ',
+  source_with: '装着画像（全体）', source_without: '未装着画像（全体）',
+  source_edited: 'AI加工画像（全体）',
+  local_with: '未解析プレビュー：装着画像', local_without: '未解析プレビュー：未装着画像',
+  local_edited: '未解析プレビュー：AI加工画像'
 };
+
+// 作業の順に並べる。入力画像の確認 → ブラシで切り替えながら見る作業レイヤーと結果 → 診断用。
+// ブラシは表示レイヤーに関係なく paintCanvas に乗るので、roi_a を表示している必要はない
+const LAYER_GROUPS = [
+  ['入力画像（全体）', ['source_with', 'source_without', 'source_edited']],
+  ['作業と結果（目元ROI）',
+    ['probability', 'trimap', 'alpha', 'product_rgba', 'composite_on_bare', 'composite_on_edited']],
+  ['診断用（目元ROI）', ['roi_a', 'roi_b', 'difference']],
+  ['未解析プレビュー（表示のみ）', ['local_with', 'local_without', 'local_edited']],
+];
+
+function layerOption(name) {
+  const opt = document.createElement('option');
+  opt.value = name;
+  opt.textContent = LAYER_NAMES[name] || name;
+  return opt;
+}
 
 function setLayerOptions(layers) {
   const sel = document.getElementById('layerSelect');
   const current = sel.value;
+  // 解析後もアップロード直後のプレビューを見比べられるよう local_* を末尾に残す。
+  // プレースホルダの '' が混ざるので落とす（呼び出し側は options の value から一覧を作り直す）
+  const given = layers.filter(Boolean);
+  const all = [...given, ...Object.keys(state.localUrls).filter(l => !given.includes(l))];
+  // 並びは正規化するが、既定の選択は呼び出し側が渡した末尾＝最新の成果物のままにする
+  const preferred = given[given.length - 1];
   sel.innerHTML = '';
-  // 解析後もアップロード直後のプレビューを見比べられるよう local_* を末尾に残す
-  const all = [...layers, ...Object.keys(state.localUrls).filter(l => !layers.includes(l))];
-  for (const l of all) {
-    const opt = document.createElement('option');
-    opt.value = l; opt.textContent = LAYER_NAMES[l] || l;
-    sel.appendChild(opt);
+  const grouped = new Set();
+  for (const [label, names] of LAYER_GROUPS) {
+    const members = names.filter(n => all.includes(n));
+    if (!members.length) continue;
+    const group = document.createElement('optgroup');
+    group.label = label;
+    for (const name of members) { group.appendChild(layerOption(name)); grouped.add(name); }
+    sel.appendChild(group);
   }
+  // グループ表に無いレイヤーも落とさない
+  for (const name of all) if (!grouped.has(name)) sel.appendChild(layerOption(name));
   // 解析・Matting 後は結果を見せたいので、プレビュー表示中なら新しいサーバ側レイヤーへ切り替える
   const keep = current && all.includes(current) && !isLocalLayer(current);
-  sel.value = keep ? current : (layers[layers.length - 1] || all[all.length - 1]);
+  sel.value = keep ? current : (preferred || all[all.length - 1]);
   return showLayer(sel.value);
 }
 
@@ -251,7 +280,11 @@ function showLayer(name) {
   updateFitAvailability();
   document.getElementById('layerSelect').value = name;
   const local = isLocalLayer(name);
-  if (!local && !state.session) return Promise.resolve(false);
+  // 無言で戻ると「レイヤーが機能していない」と誤解されるので、作られる手順を案内する
+  if (!local && !state.session) {
+    if (name) status(`${LAYER_NAMES[name] || name} はまだありません。このレイヤーは「解析開始」のあとに作られます。`);
+    return Promise.resolve(false);
+  }
   const src = local ? state.localUrls[name] : `/api/image/${state.session}/${name}?t=${Date.now()}`;
   if (!src) return Promise.resolve(false);
   const dl = document.getElementById('btnDownload');
@@ -262,7 +295,7 @@ function showLayer(name) {
     img.onload = () => {
       // 元画像は目元ROIと解像度が違うので、ブラシ用キャンバスのサイズ（=制約PNGのサイズ）は変えない
       const viewOnly = isViewOnlyLayer(name);
-      // 同じ解像度のレイヤー間（Original/Probability/Alpha 等）ではズーム率を維持して見比べられるようにする
+      // 同じ解像度のレイヤー間（目元ROI/Probability/Alpha 等）ではズーム率を維持して見比べられるようにする
       const sizeChanged = baseCanvas.width !== img.width || baseCanvas.height !== img.height;
       baseCanvas.width = img.width;
       baseCanvas.height = img.height;
@@ -397,7 +430,7 @@ function updateFitAvailability() {
     : !isManualRoi()
       ? '手動ROIモードのときに使えます（正面モードは顔検出で自動配置されます）'
       : !isFitLayer()
-        ? '「選択した画像 (AI加工済み)」または「元画像 (AI加工済み)」レイヤーを表示すると使えます'
+        ? `「${LAYER_NAMES.local_edited}」または「${LAYER_NAMES.source_edited}」レイヤーを表示すると使えます`
         : 'ROI-Bの枠をドラッグで移動、四隅で拡縮、上のハンドルで回転できます';
   for (const id of ['btnFit', 'fitScale', 'fitAngle', 'fitFlip', 'fitReset'])
     document.getElementById(id).disabled = !available;

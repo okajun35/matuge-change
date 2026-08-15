@@ -233,6 +233,73 @@ class TestGroupedControls:
             assert control in html
 
 
+class TestLayerSelector:
+    """表示レイヤーの選択肢が、何の画像かとどの手順で作られるかを説明していること。"""
+
+    def test_initial_option_is_a_placeholder_not_a_real_layer(self):
+        page = _page()
+        # roi_a は解析後にしか存在しないので、初期状態で選べる項目として置かない
+        assert '<option value="roi_a">' not in page
+        assert re.search(r'<option value="" disabled selected>[^<]+</option>', page)
+
+    def test_choosing_a_layer_before_analysis_explains_why_nothing_appears(self):
+        page = _page()
+        # 無言で return すると「機能していない」と誤解される
+        assert "このレイヤーは「解析開始」のあとに作られます" in page
+        assert page.index("このレイヤーは「解析開始」のあとに作られます") > page.index("function showLayer")
+
+    def test_layers_are_grouped_in_work_order(self):
+        page = _page()
+        assert "LAYER_GROUPS" in page
+        assert "optgroup" in page
+        groups = (
+            "入力画像（全体）",
+            "作業と結果（目元ROI）",
+            "診断用（目元ROI）",
+            "未解析プレビュー（表示のみ）",
+        )
+        positions = [page.index(g) for g in groups]
+        assert positions == sorted(positions)
+
+    def test_frequently_used_layers_come_before_diagnostics(self):
+        page = _page()
+        # 実際の作業は Probability→Trimap→Alpha→Product RGBA→再合成 を切り替えて行う。
+        # 位置合わせ確認用の roi_b と、手動ROIでは Probability と同一になる difference は後ろ
+        work = page.index("['probability', 'trimap', 'alpha', 'product_rgba'")
+        assert "'composite_on_bare', 'composite_on_edited'" in page
+        assert work < page.index("['roi_a', 'roi_b', 'difference']")
+
+    def test_labels_name_the_image_and_its_role(self):
+        page = _page()
+        # 「Original」は装着画像を指すのに未装着と誤読されるため使わない
+        assert "Original (装着)" not in page
+        assert "Aligned (未装着)" not in page
+        for label in (
+            "目元ROI：装着（抽出元）",
+            "目元ROI：未装着（位置合わせ済み）",
+            "装着画像（全体）",
+            "未装着画像（全体）",
+            "未解析プレビュー：装着画像",
+        ):
+            assert label in page
+
+    def test_reordering_never_drops_a_layer(self):
+        page = _page()
+        # グループ表に無いレイヤーも落とさない（再開時の roi_b、再合成レイヤー）
+        assert "if (!grouped.has(name))" in page
+
+    def test_default_selection_still_follows_the_caller_order(self):
+        page = _page()
+        # 並びを正規化しても「解析直後は Probability」「Matting 後は最新の成果物」を保つ
+        assert "const preferred =" in page
+        assert page.index("const preferred =") < page.index("sel.innerHTML = ''")
+
+    def test_placeholder_value_is_never_treated_as_a_layer(self):
+        page = _page()
+        # 既存コードは [...sel.options].map(o => o.value) でレイヤー一覧を作り直す
+        assert ".filter(Boolean)" in page
+
+
 class TestZoomableViewer:
     def test_stage_is_a_scrollable_viewport(self):
         page = _page()

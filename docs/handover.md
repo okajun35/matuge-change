@@ -80,9 +80,13 @@
   - セッション再開時はファイル入力が空でも `roi_b` を残す
   - Matting再実行で `composite_on_edited` を落とさない
   - 解析・Matting後は `local_*` を選択中でも結果レイヤーへ切り替える
+- 表示セレクタの選択肢は `LAYER_NAMES`（ラベル）と `LAYER_GROUPS`（`optgroup` の並び）で決める。並びは実際の作業順（入力画像の確認 → `probability`/`trimap`/`alpha`/`product_rgba`/`composite_*` → 診断用の `roi_a`/`roi_b`/`difference`）。**ブラシは表示レイヤーに関係なく `paintCanvas` に乗るので `roi_a` を表示する必要はない**（作業中はTrimap/Alphaを見ながら塗る）。`difference` は手動ROIでは `prior=1` のため `probability` とビット一致する＝情報が増えないので後ろに置く
+- **表示順は正規化するが、既定の選択は呼び出し側が渡した `layers` の末尾（＝最新の成果物）を使う**（`preferred`）。並べ替えでレイヤーを落とさないよう、`LAYER_GROUPS` に無い名前は末尾にそのまま追加する
+- セレクタの初期項目は `value=""` の無効プレースホルダ。レイヤー一覧は `[...sel.options].map(o => o.value)` から作り直されるので、`''` を `filter(Boolean)` で落とすこと
 
 ## 6. 過去に踏んだ落とし穴（再発防止）
 
+- **`Original (装着)` というラベルが「未装着」と誤読された**（`Original` = 加工前の入力＝装着画像の意図だった）。さらに解析前からこの項目がセレクタに入っており、選んでも `showLayer` が無言で return するため「レイヤーが機能していない」と誤解される作りだった。今はラベルを `目元ROI：装着（抽出元）` 等に変え、解析前はプレースホルダのみ＋案内メッセージを出す
 - **uvicorn は自動リロードしない**: 新しいルートを追加/pullしたらサーバを再起動する。していないと 404 を「バグ」と誤診する
 - MediaPipe は `libEGL.so.1` / GLES を要求する → Docker/CI に `libegl1` `libgles2` を入れる
 - `fetch` の例外を catch しないと、アップロード失敗時にUIが「解析中…」のまま固まる（PR #9 の `postForm()`）
