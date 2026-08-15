@@ -1,6 +1,9 @@
+import threading
+import time
+
 from backend.jobs.job import JobStatus
 from backend.jobs.repository import InMemoryJobRepository
-from backend.jobs.runner import MatteJobRunner
+from backend.jobs.runner import MatteJobRunner, max_workers
 
 
 class TestMatteJobRunner:
@@ -43,3 +46,44 @@ class TestMatteJobRunner:
         job_id = runner.submit("sess1", {}, lambda report: {"layers": []})
         assert repo.get(job_id) is not None
         runner.wait(job_id, timeout=10)
+
+    def test_jobs_do_not_run_concurrently_by_default(self):
+        """Two mattings at once would double the peak memory and get the process OOM-killed."""
+        runner = MatteJobRunner(InMemoryJobRepository())
+        overlapped = []
+        active = [0]
+        lock = threading.Lock()
+
+        def work(_report):
+            with lock:
+                active[0] += 1
+                overlapped.append(active[0] > 1)
+            time.sleep(0.2)
+            with lock:
+                active[0] -= 1
+            return {"layers": []}
+
+        first = runner.submit("sess1", {}, work)
+        second = runner.submit("sess1", {}, work)
+        runner.wait(first, timeout=10)
+        runner.wait(second, timeout=10)
+
+        assert overlapped == [False, False]
+
+    def test_memory_is_released_after_every_job(self, monkeypatch):
+        released = []
+        monkeypatch.setattr("backend.jobs.runner.release_memory", lambda: released.append(True))
+        runner = MatteJobRunner(InMemoryJobRepository())
+
+        runner.wait(runner.submit("sess1", {}, lambda report: {"layers": []}), timeout=10)
+        runner.wait(runner.submit("sess1", {}, lambda report: 1 / 0), timeout=10)
+
+        assert len(released) == 2
+
+    def test_worker_count_comes_from_the_environment(self, monkeypatch):
+        monkeypatch.delenv("MATTE_MAX_WORKERS", raising=False)
+        assert max_workers() == 1
+        monkeypatch.setenv("MATTE_MAX_WORKERS", "3")
+        assert max_workers() == 3
+        monkeypatch.setenv("MATTE_MAX_WORKERS", "nonsense")
+        assert max_workers() == 1

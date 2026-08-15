@@ -198,9 +198,9 @@ class TestRunnerAndReport:
 
 
 class TestFailuresAreRecorded:
-    def test_a_pipeline_exception_becomes_a_row(self, tmp_path):
-        """A flat image gives a probability map that never reaches fg_thresh, and
-        pymatting then raises on a trimap without foreground. That is a result."""
+    def test_a_degenerate_case_completes_with_an_empty_matte(self, tmp_path):
+        """A flat image gives a probability map that never reaches fg_thresh. Matting used to
+        raise inside pymatting on such a trimap; it now short-circuits to an empty matte."""
         import cv2
 
         directory = tmp_path / "case_0001"
@@ -220,8 +220,40 @@ class TestFailuresAreRecorded:
             None,
         )
         assert len(rows) == 1
+        assert rows[0]["failed"] is False
+        # nothing is extracted, which is the right answer for a flat image
+        assert rows[0]["reconstruction_error"] == 0.0
+
+    def test_a_pipeline_exception_becomes_a_row(self, tmp_path, monkeypatch):
+        """A crash in one case is a result, not a reason to abandon the whole run."""
+        import cv2
+
+        from evaluation import runner as evaluation_runner
+
+        directory = tmp_path / "case_0001"
+        directory.mkdir()
+        flat = np.full((80, 100, 3), 128, np.uint8)
+        cv2.imwrite(str(directory / "worn.png"), flat)
+        cv2.imwrite(str(directory / "bare.png"), flat)
+        cv2.imwrite(str(directory / "gt_alpha.png"), np.zeros((80, 100), np.uint8))
+        cv2.imwrite(str(directory / "gt_mask.png"), np.zeros((80, 100), np.uint8))
+        (directory / "metadata.json").write_text(
+            json.dumps({"id": "case_0001", "condition": "degenerate", "roi_rect": [10, 10, 90, 70]})
+        )
+
+        def explode(*_args, **_kwargs):
+            raise ValueError("matting exploded")
+
+        monkeypatch.setattr(evaluation_runner, "run_pipeline", explode)
+
+        rows = run_dataset(
+            load_dataset(str(tmp_path)),
+            RunConfig(modes=("bare",), brushes=("auto",), save_images=False),
+            None,
+        )
+        assert len(rows) == 1
         assert rows[0]["failed"] is True
-        assert "Trimap" in rows[0]["error"] or "ValueError" in rows[0]["error"]
+        assert "matting exploded" in rows[0]["error"]
         summary = report.summarise(rows)
         assert summary["overall"]["bare/auto"]["failed"] == 1
         assert np.isnan(summary["overall"]["bare/auto"]["dice"])

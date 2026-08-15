@@ -2,21 +2,35 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from backend.jobs.job import MatteJob
+from backend.jobs.memory import release_memory
 from backend.jobs.repository import JobRepository
 
 ProgressReporter = Callable[[int, str], None]
 Work = Callable[[ProgressReporter], dict[str, Any]]
 
+DEFAULT_MAX_WORKERS = 1
+
+
+def max_workers() -> int:
+    """Concurrent mattings. One by default: each solve is the process' memory peak, and two
+    of them at once is what gets a 512MB host OOM-killed (the second click returning 502)."""
+    try:
+        value = int(os.environ.get("MATTE_MAX_WORKERS", "").strip())
+    except ValueError:
+        return DEFAULT_MAX_WORKERS
+    return value if value > 0 else DEFAULT_MAX_WORKERS
+
 
 class MatteJobRunner:
-    def __init__(self, repository: JobRepository, max_workers: int = 2) -> None:
+    def __init__(self, repository: JobRepository, workers: int | None = None) -> None:
         self._repository = repository
-        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="matte")
+        self._executor = ThreadPoolExecutor(max_workers=workers or max_workers(), thread_name_prefix="matte")
         self._futures: dict[str, Future] = {}
 
     def submit(self, session_id: str, params: dict[str, Any], work: Work) -> str:
@@ -45,3 +59,4 @@ class MatteJobRunner:
         except Exception as exc:  # surfaced to the client through the job record
             job.fail(f"{type(exc).__name__}: {exc}")
         self._repository.save(job)
+        release_memory()

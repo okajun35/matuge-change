@@ -100,10 +100,11 @@ def nearest_source_colors(rgba: np.ndarray, matrix: np.ndarray, size: tuple[int,
 
 def composite_over(rgba: np.ndarray, base_bgr: np.ndarray) -> np.ndarray:
     """Alpha blend exactly as `recompose_onto` finishes its work."""
-    alpha = rgba[..., 3:4].astype(np.float64) / 255.0
-    foreground = rgba[..., :3].astype(np.float64) / 255.0
-    base = base_bgr.astype(np.float64) / 255.0
-    return (np.clip(alpha * foreground + (1.0 - alpha) * base, 0, 1) * 255).astype(np.uint8)
+    alpha = rgba[..., 3].astype(np.float32) / 255.0
+    out = base_bgr.astype(np.float32)
+    for channel in range(3):
+        out[..., channel] += alpha * (rgba[..., channel] - out[..., channel])
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
 def recompose_matrix(roi: EyeRoi, lms_worn: np.ndarray, lms_edited: np.ndarray) -> np.ndarray:
