@@ -30,6 +30,8 @@
   <button id="btnUpload">② 解析開始</button>
   <label>セッションID <input type="text" id="sessionId" size="12" placeholder="作業を再開"></label>
   <button id="btnResume" class="secondary">再開</button>
+  <button id="btnArchive" class="secondary" title="セッションの画像一式をSupabase Storageへ退避">退避</button>
+  <button id="btnArchiveRestore" class="secondary" title="退避済みセッションをこのサーバへ復元">取り込み</button>
   <span class="sep"></span>
   <label>表示:
     <select id="layerSelect">
@@ -295,11 +297,9 @@ document.getElementById('btnUpload').onclick = async () => {
 
 document.getElementById('layerSelect').onchange = (e) => showLayer(e.target.value);
 
-document.getElementById('btnResume').onclick = async () => {
-  const sid = document.getElementById('sessionId').value.trim();
-  if (!sid) { status('セッションID を入力してください'); return; }
+async function resumeSession(sid) {
   const res = await fetch(`/api/sessions/${sid}`);
-  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
+  if (!res.ok) { status('エラー: ' + (await res.text())); return false; }
   const data = await res.json();
   state.session = sid;
   state.w = data.width; state.h = data.height;
@@ -309,6 +309,37 @@ document.getElementById('btnResume').onclick = async () => {
   await loadStrokes(sid);
   restorePaint();
   status(`セッション ${sid} を復元しました（ブラシストローク ${state.strokes.length} 本）。`);
+  return true;
+}
+
+function currentSessionId() {
+  return (document.getElementById('sessionId').value || '').trim() || state.session;
+}
+
+document.getElementById('btnResume').onclick = async () => {
+  const sid = currentSessionId();
+  if (!sid) { status('セッションID を入力してください'); return; }
+  await resumeSession(sid);
+};
+
+// 別マシン・別セッションへの引き継ぎ用。Supabase 未設定なら 503 が返る
+document.getElementById('btnArchive').onclick = async () => {
+  const sid = currentSessionId();
+  if (!sid) { status('セッションID を入力してください'); return; }
+  status('退避中…（Supabase Storage へアップロード）');
+  const res = await fetch(`/api/sessions/${sid}/archive`, { method: 'POST' });
+  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
+  const data = await res.json();
+  status(`セッション ${sid} を退避しました（${data.files.length} ファイル）。他の環境ではこのIDで「取り込み」できます。`);
+};
+
+document.getElementById('btnArchiveRestore').onclick = async () => {
+  const sid = (document.getElementById('sessionId').value || '').trim();
+  if (!sid) { status('取り込むセッションID を入力してください'); return; }
+  status('取り込み中…（Supabase Storage からダウンロード）');
+  const res = await fetch(`/api/sessions/${sid}/archive/restore`, { method: 'POST' });
+  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
+  await resumeSession(sid);
 };
 
 function setBrush(mode, btn) {

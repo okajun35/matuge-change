@@ -69,6 +69,24 @@ async def get_session(session_id: str):
     }
 
 
+@router.post("/sessions/{session_id}/archive")
+async def export_session(session_id: str):
+    """セッションのファイル一式を Supabase Storage へ退避する。"""
+    try:
+        return container().archive.export(session_id)
+    except Exception as exc:
+        raise to_http(exc) from exc
+
+
+@router.post("/sessions/{session_id}/archive/restore")
+async def restore_session(session_id: str):
+    """退避済みセッションをこのマシンの `data/` に復元する。"""
+    try:
+        return container().archive.restore(session_id)
+    except Exception as exc:
+        raise to_http(exc) from exc
+
+
 @router.get("/sessions/{session_id}/runs")
 async def get_runs(session_id: str):
     try:

@@ -44,6 +44,35 @@ def session_id():
     shutil.rmtree(sdir, ignore_errors=True)
 
 
+class InMemoryArchive:
+    """Supabase Storage の代わりに使うオブジェクトストア。"""
+
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def upload(self, path: str, data: bytes) -> None:
+        self.objects[path] = data
+
+    def download(self, path: str) -> bytes:
+        return self.objects[path]
+
+    def list(self, prefix: str) -> list[str]:
+        return sorted(p for p in self.objects if p.startswith(f"{prefix}/"))
+
+
+@pytest.fixture
+def fake_archive():
+    """Supabase 未設定の環境でも退避／復元エンドポイントを検証できるようにする。"""
+    from backend.api.container import container
+
+    archive = InMemoryArchive()
+    service = container().archive
+    original = service.archive
+    service.archive = archive
+    yield archive
+    service.archive = original
+
+
 @pytest.fixture
 def matted_session(client, session_id) -> str:
     assert client.post("/api/matte", data={"session_id": session_id}).status_code == 200
