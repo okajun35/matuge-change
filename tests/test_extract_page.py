@@ -101,6 +101,35 @@ class TestRoiModeToggle:
         assert "/input|textarea|select/i.test(e.target.tagName)" in page
         assert "fitMode" in page
 
+    def test_fit_rotation_handle_hit_test_matches_drawn_position(self):
+        page = _page()
+        assert "local[1] + geometry.h / 2 + 30 / state.zoom" in page
+
+    def test_fit_center_is_initialized_when_fit_starts_and_roi_changes(self):
+        page = _page()
+        assert "function initializeFitCenter(force = false)" in page
+        assert "initializeFitCenter();" in page
+
+    def test_fit_result_resets_scale_and_center(self):
+        page = _page()
+        assert "state.fitScale = 100;" in page
+        assert "state.fitCenter = [(state.roiB[0] + state.roiB[2]) / 2" in page
+
+    def test_fit_exit_keeps_available_controls_visible(self):
+        page = _page()
+        assert "state.fitMode = false;\n    updateFitAvailability();" in page
+        assert page.count("state.fitMode = false;\n    updateFitAvailability();") >= 2
+
+    def test_fit_drag_starts_only_inside_transformed_frame(self):
+        page = _page()
+        assert "const inside = Math.abs(local[0]) <= geometry.w / 2" in page
+        assert "if (!inside && !nearCorner && !rotationHandle) return;" in page
+
+    def test_resume_resets_fit_scale_input(self):
+        page = _page()
+        assert "state.fitScale = 100;" in page
+        assert "document.getElementById('fitScale').value = state.fitScale;" in page
+
 
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):

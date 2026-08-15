@@ -336,6 +336,10 @@ function fitRect() {
   const cy = state.fitCenter ? state.fitCenter[1] : (state.roiB[1] + state.roiB[3]) / 2;
   return { b, w: bw * scale, h: bh * scale, cx, cy };
 }
+function initializeFitCenter(force = false) {
+  if (!state.roiB || (!force && state.fitCenter)) return;
+  state.fitCenter = [(state.roiB[0] + state.roiB[2]) / 2, (state.roiB[1] + state.roiB[3]) / 2];
+}
 function updateFitHint() {
   if (!isManualRoi() || !state.roiB) return;
   const hint = document.getElementById('roiHint');
@@ -407,6 +411,7 @@ function enterFit() {
   if (!isManualRoi() || !isFitLayer() || !state.session) return;
   if (state.activeRoi) { status('ROI指定中は位置合わせを開始できません'); return; }
   if (!state.roiB) { status('加工画像で ROI-B を指定してください'); armRoi('b'); return; }
+  initializeFitCenter();
   ensureFitImage();
   state.fitMode = !state.fitMode;
   setBrush(null, null);
@@ -433,7 +438,9 @@ fitCanvas.addEventListener('pointerdown', (e) => {
   const nearCorner = Math.abs(Math.abs(local[0]) - geometry.w / 2) < 14 / state.zoom
     && Math.abs(Math.abs(local[1]) - geometry.h / 2) < 14 / state.zoom;
   const rotationHandle = Math.abs(local[0]) < 14 / state.zoom
-    && Math.abs(local[1] + geometry.h / 2 - 30 / state.zoom) < 14 / state.zoom;
+    && Math.abs(local[1] + geometry.h / 2 + 30 / state.zoom) < 14 / state.zoom;
+  const inside = Math.abs(local[0]) <= geometry.w / 2 && Math.abs(local[1]) <= geometry.h / 2;
+  if (!inside && !nearCorner && !rotationHandle) return;
   state.fitDrag = {
     type: rotationHandle ? 'rotate' : nearCorner ? 'scale' : 'move',
     start: fitPoint(e), startScale: state.fitScale, startAngle: state.fitAngle,
@@ -499,7 +506,10 @@ function fallbackToManualRoi() {
 
 function armRoi(kind) {
   if (!isManualRoi()) return;
-  if (state.fitMode) { state.fitMode = false; document.getElementById('fitControls').style.display = 'none'; }
+  if (state.fitMode) {
+    state.fitMode = false;
+    updateFitAvailability();
+  }
   const target = kind === 'a'
     ? (state.localUrls.local_with ? 'local_with' : 'source_with')
     : (state.localUrls.local_edited ? 'local_edited' : 'source_edited');
@@ -532,7 +542,7 @@ window.addEventListener('keydown', (e) => {
   if (!state.fitMode || /input|textarea|select/i.test(e.target.tagName)) return;
   if (e.key === 'Escape') {
     state.fitMode = false;
-    document.getElementById('fitControls').style.display = 'none';
+    updateFitAvailability();
     document.getElementById('btnFit').classList.remove('brush-active');
     drawFitPreview();
     return;
@@ -581,6 +591,7 @@ canvasWrap.addEventListener('pointermove', (e) => {
 window.addEventListener('pointerup', () => {
   if (!roiDragging) return;
   roiDragging = false;
+  if (state.activeRoi === 'b') initializeFitCenter(true);
   state.activeRoi = null;
   updateRoiHint();
 });
@@ -681,9 +692,10 @@ async function resumeSession(sid) {
   state.productBBox = data.product_bbox || null;
   state.fitAngle = data.dest_angle || 0;
   state.fitFlip = !!data.dest_flip;
+  state.fitScale = 100;
   state.fitMode = false;
   fitImage = null;
-  if (state.roiB) state.fitCenter = [(state.roiB[0] + state.roiB[2]) / 2, (state.roiB[1] + state.roiB[3]) / 2];
+  initializeFitCenter(true);
   document.getElementById('fitScale').value = state.fitScale;
   document.getElementById('fitAngle').value = state.fitAngle;
   document.getElementById('fitFlip').checked = state.fitFlip;
@@ -830,7 +842,12 @@ document.getElementById('btnRecompose').onclick = async () => {
   }
   try {
     const result = await postForm('/api/recompose', fd);
-    if (result.dest_rect) state.roiB = result.dest_rect;
+    if (result.dest_rect) {
+      state.roiB = result.dest_rect;
+      state.fitScale = 100;
+      initializeFitCenter(true);
+      document.getElementById('fitScale').value = state.fitScale;
+    }
     if (result.product_bbox) state.productBBox = result.product_bbox;
     state.fitAngle = result.angle || 0;
     state.fitFlip = !!result.flip;
