@@ -13,6 +13,15 @@
   .brush-active { outline: 2px solid #ff5; }
   #progress { height: 6px; background: #333; border-radius: 3px; overflow: hidden; width: 220px; }
   #progressBar { height: 100%; width: 0; background: #4a6cf7; transition: width .2s; }
+  .roi-overlay { position: absolute; display: none; pointer-events: none; box-sizing: border-box; }
+  #roiOverlayA { border: 2px solid #00e5ff; background: rgba(0,229,255,.12); }
+  #roiOverlayB { border: 2px dashed #ff9f1c; background: rgba(255,159,28,.12); }
+  .roi-overlay::before { position: absolute; left: 3px; top: 1px; font-weight: bold; }
+  #roiOverlayA::before { content: 'A'; color: #00e5ff; }
+  #roiOverlayB::before { content: 'B'; color: #ff9f1c; }
+  #fitCanvas { display: none; z-index: 4; pointer-events: none; }
+  #fitControls { color: #ffd; }
+  #roiHint { font-size: 13px; color: #ffd; }
 </style>
 </head>
 <body>
@@ -27,6 +36,26 @@
 <div class="bar" id="controls">
   <label>① 装着画像: <input type="file" id="fileWith" accept="image/*"></label>
   <label>未装着画像(任意): <input type="file" id="fileWithout" accept="image/*"></label>
+  <label>目元の指定:
+    <select id="roiMode">
+      <option value="auto">正面（顔検出で自動）</option>
+      <option value="manual">横顔・目のアップ（手動ROI）</option>
+    </select>
+  </label>
+  <span id="roiControls" style="display:none">
+    <button id="roiBtnA" class="secondary">ROI-A 指定（装着画像）</button>
+    <button id="roiBtnB" class="secondary">ROI-B 指定（加工画像）</button>
+    <button id="roiClear" class="secondary">ROIクリア</button>
+    <label><input type="checkbox" id="roiShow" checked> ROI枠を表示</label>
+  </span>
+  <span id="roiHint"></span>
+  <span id="fitControls" style="display:none">
+    <button id="btnFit" class="secondary">位置合わせ</button>
+    <label>スケール <input id="fitScale" type="number" min="10" max="400" step="1" value="100">%</label>
+    <label>角度 <input id="fitAngle" type="number" min="-180" max="180" step="0.1" value="0">°</label>
+    <label><input id="fitFlip" type="checkbox"> 左右反転</label>
+    <button id="fitReset" class="secondary">リセット</button>
+  </span>
   <button id="btnUpload">② 解析開始</button>
   <label>セッションID <input type="text" id="sessionId" size="12" placeholder="作業を再開"></label>
   <button id="btnResume" class="secondary">再開</button>
@@ -61,7 +90,7 @@
   <button id="btnMatte">③ Matting実行</button>
   <span class="sep"></span>
   <label>編集済み画像: <input type="file" id="fileEdited" accept="image/*"></label>
-  <button id="btnRecompose">再合成</button>
+  <button id="btnRecompose">④ 再合成（顔検出で自動）</button>
   <a id="btnDownload" download><button class="secondary">表示中レイヤーを保存</button></a>
   <div id="progress"><div id="progressBar"></div></div>
 </div>
@@ -80,6 +109,9 @@
   <div id="canvasWrap">
     <canvas id="baseCanvas"></canvas>
     <canvas id="paintCanvas"></canvas>
+    <canvas id="fitCanvas"></canvas>
+    <div id="roiOverlayA" class="roi-overlay"></div>
+    <div id="roiOverlayB" class="roi-overlay"></div>
   </div>
 </div>
 
@@ -87,16 +119,20 @@
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
   strokes: [], current: null, supabase: null, channel: null,
-  zoom: 1, localUrls: {},
+  zoom: 1, localUrls: {}, roiA: null, roiB: null, activeRoi: null,
+  fitMode: false, fitScale: 100, fitAngle: 0, fitFlip: false,
+  productBBox: null, fitCenter: null, fitDrag: null,
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
 const baseCanvas = document.getElementById('baseCanvas');
 const paintCanvas = document.getElementById('paintCanvas');
+const fitCanvas = document.getElementById('fitCanvas');
 const stage = document.getElementById('stage');
 const canvasWrap = document.getElementById('canvasWrap');
 const bctx = baseCanvas.getContext('2d');
 const pctx = paintCanvas.getContext('2d');
+const fctx = fitCanvas.getContext('2d');
 const status = (msg) => document.getElementById('status').textContent = msg;
 
 // fetch は通信断・ファイル読み取り失敗で reject するため、必ず捕まえて理由を表示する
@@ -175,6 +211,8 @@ stage.addEventListener('wheel', (e) => {
 // 表示完了を待てるよう Promise を返す（ストローク再生はキャンバスのリサイズ後に行う必要がある）
 function showLayer(name) {
   state.layer = name;
+  updateFitAvailability();
+  document.getElementById('layerSelect').value = name;
   const local = isLocalLayer(name);
   if (!local && !state.session) return Promise.resolve(false);
   const src = local ? state.localUrls[name] : `/api/image/${state.session}/${name}?t=${Date.now()}`;
@@ -202,9 +240,13 @@ function showLayer(name) {
       if (img.width > stage.clientWidth || img.height > stage.clientHeight) fitZoom();
       else setZoom(1);
       restorePaint();
+      drawRoiOverlay();
+      drawFitPreview();
+      updateFitAvailability();
       resolve(true);
     };
     img.onerror = () => {
+      updateFitAvailability();
       status(`エラー: ${LAYER_NAMES[name] || name} を表示できませんでした`);
       resolve(false);
     };
@@ -228,7 +270,334 @@ function registerLocalPreview(inputId, layer) {
 }
 registerLocalPreview('fileWith', 'local_with');
 registerLocalPreview('fileWithout', 'local_without');
+document.getElementById('fileWithout').addEventListener('change', () => updateRoiHint());
 registerLocalPreview('fileEdited', 'local_edited');
+
+// 横顔・目のアップは顔検出が効かないため、元画像上でドラッグした矩形を目元ROIとして送る
+const roiModeSelect = document.getElementById('roiMode');
+const roiControls = document.getElementById('roiControls');
+const roiOverlayA = document.getElementById('roiOverlayA');
+const roiOverlayB = document.getElementById('roiOverlayB');
+const roiShow = document.getElementById('roiShow');
+const isManualRoi = () => roiModeSelect.value === 'manual';
+const roiFor = (kind) => kind === 'a' ? state.roiA : state.roiB;
+const isRoiLayer = (name, kind = state.activeRoi) => kind === 'a'
+  ? name === 'local_with' || name === 'source_with'
+  : name === 'local_edited' || name === 'source_edited';
+
+function drawRoiOverlay() {
+  for (const [kind, overlay] of [['a', roiOverlayA], ['b', roiOverlayB]]) {
+    const r = roiFor(kind);
+    const visible = r && isManualRoi() && roiShow.checked && isRoiLayer(state.layer, kind);
+    overlay.style.display = visible ? 'block' : 'none';
+    if (visible) {
+      overlay.style.left = Math.min(r[0], r[2]) + 'px';
+      overlay.style.top = Math.min(r[1], r[3]) + 'px';
+      overlay.style.width = Math.abs(r[2] - r[0]) + 'px';
+      overlay.style.height = Math.abs(r[3] - r[1]) + 'px';
+    }
+  }
+}
+
+function updateRoiHint() {
+  const hint = document.getElementById('roiHint');
+  roiControls.style.display = isManualRoi() ? 'inline-flex' : 'none';
+  for (const [id, kind] of [['roiBtnA', 'a'], ['roiBtnB', 'b']])
+    document.getElementById(id).classList.toggle('brush-active', state.activeRoi === kind);
+  document.getElementById('btnUpload').textContent = isManualRoi() ? '② 解析開始（ROI-A）' : '② 解析開始';
+  document.getElementById('btnRecompose').textContent = isManualRoi()
+    ? '④ 再合成（ROI-Bへ貼付）' : '④ 再合成（顔検出で自動）';
+  if (!isManualRoi()) { hint.textContent = ''; drawRoiOverlay(); return; }
+  const format = (r) => r
+    ? `${Math.round(Math.abs(r[2] - r[0]))}×${Math.round(Math.abs(r[3] - r[1]))}px`
+    : '未指定';
+  // 手動ROIでは顔ランドマーク位置合わせができないので、未装着画像は同じ矩形で切り抜かれる
+  const bareWarning = document.getElementById('fileWithout').files[0]
+    ? '　⚠ 手動ROIでは未装着画像を位置合わせできません（同じ構図でないなら外してください）'
+    : '';
+  hint.textContent = `ROI-A ${format(state.roiA)} ／ ROI-B ${format(state.roiB)}` + bareWarning;
+  drawRoiOverlay();
+  drawFitPreview();
+}
+
+let fitImage = null;
+function isFitLayer(name = state.layer) {
+  return name === 'local_edited' || name === 'source_edited';
+}
+function fitRect() {
+  if (!state.roiB || !fitImage) return null;
+  const b = state.productBBox || [0, 0, fitImage.naturalWidth, fitImage.naturalHeight];
+  const bw = Math.max(1, b[2] - b[0]);
+  const bh = Math.max(1, b[3] - b[1]);
+  const base = Math.min(
+    Math.abs(state.roiB[2] - state.roiB[0]) / bw,
+    Math.abs(state.roiB[3] - state.roiB[1]) / bh,
+  );
+  const scale = base * state.fitScale / 100;
+  const cx = state.fitCenter ? state.fitCenter[0] : (state.roiB[0] + state.roiB[2]) / 2;
+  const cy = state.fitCenter ? state.fitCenter[1] : (state.roiB[1] + state.roiB[3]) / 2;
+  return { b, w: bw * scale, h: bh * scale, cx, cy };
+}
+function initializeFitCenter(force = false) {
+  if (!state.roiB || (!force && state.fitCenter)) return;
+  state.fitCenter = [(state.roiB[0] + state.roiB[2]) / 2, (state.roiB[1] + state.roiB[3]) / 2];
+}
+function updateFitHint() {
+  if (!isManualRoi() || !state.roiB) return;
+  const hint = document.getElementById('roiHint');
+  hint.textContent = `${hint.textContent.split(' ／')[0]} ／ ROI-B ${Math.round(Math.abs(state.roiB[2] - state.roiB[0]))}×${Math.round(Math.abs(state.roiB[3] - state.roiB[1]))}px ／ 角度 ${Number(state.fitAngle).toFixed(1)}° ／ ${state.fitFlip ? '反転' : '反転なし'}`;
+}
+function updateFitAvailability() {
+  const controls = document.getElementById('fitControls');
+  const available = !!state.session && isManualRoi() && isFitLayer();
+  controls.style.display = available ? 'inline-flex' : 'none';
+  if (!available) {
+    state.fitMode = false;
+    document.getElementById('btnFit').classList.remove('brush-active');
+  }
+}
+function drawFitPreview() {
+  if (!fitCanvas || !baseCanvas.width) return;
+  fitCanvas.width = baseCanvas.width;
+  fitCanvas.height = baseCanvas.height;
+  fctx.clearRect(0, 0, fitCanvas.width, fitCanvas.height);
+  const geometry = fitRect();
+  const visible = state.fitMode && isFitLayer() && fitImage && geometry;
+  fitCanvas.style.display = visible ? 'block' : 'none';
+  fitCanvas.style.pointerEvents = visible ? 'auto' : 'none';
+  if (!visible) return;
+  const { b, w, h, cx, cy } = geometry;
+  fctx.save();
+  fctx.translate(cx, cy);
+  fctx.rotate(Number(state.fitAngle) * Math.PI / 180);
+  fctx.scale(state.fitFlip ? -1 : 1, 1);
+  fctx.drawImage(fitImage, b[0], b[1], b[2] - b[0], b[3] - b[1], -w / 2, -h / 2, w, h);
+  if (roiShow.checked) {
+    fctx.strokeStyle = '#ff9f1c';
+    fctx.lineWidth = 2 / state.zoom;
+    fctx.strokeRect(-w / 2, -h / 2, w, h);
+    fctx.fillStyle = '#fff';
+    fctx.strokeStyle = '#ff9f1c';
+    fctx.beginPath();
+    fctx.moveTo(0, -h / 2);
+    fctx.lineTo(0, -h / 2 - 30 / state.zoom);
+    fctx.stroke();
+    fctx.beginPath();
+    fctx.arc(0, -h / 2 - 30 / state.zoom, 5 / state.zoom, 0, Math.PI * 2);
+    fctx.fill();
+    fctx.stroke();
+    for (const [x, y] of [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]])
+      { fctx.beginPath(); fctx.arc(x, y, 5 / state.zoom, 0, Math.PI * 2); fctx.fill(); fctx.stroke(); }
+  }
+  fctx.restore();
+}
+function ensureFitImage() {
+  if (!state.session || fitImage) return;
+  fitImage = new Image();
+  fitImage.onload = () => drawFitPreview();
+  fitImage.src = `/api/image/${state.session}/product_rgba?t=${Date.now()}`;
+}
+function resetFit() {
+  if (!state.roiB) return;
+  state.fitScale = 100;
+  state.fitAngle = 0;
+  state.fitFlip = false;
+  state.fitCenter = [(state.roiB[0] + state.roiB[2]) / 2, (state.roiB[1] + state.roiB[3]) / 2];
+  document.getElementById('fitScale').value = state.fitScale;
+  document.getElementById('fitAngle').value = state.fitAngle;
+  document.getElementById('fitFlip').checked = state.fitFlip;
+  updateFitHint();
+  drawFitPreview();
+}
+function enterFit() {
+  if (!isManualRoi() || !isFitLayer() || !state.session) return;
+  if (state.activeRoi) { status('ROI指定中は位置合わせを開始できません'); return; }
+  if (!state.roiB) { status('加工画像で ROI-B を指定してください'); armRoi('b'); return; }
+  initializeFitCenter();
+  ensureFitImage();
+  state.fitMode = !state.fitMode;
+  setBrush(null, null);
+  updateFitAvailability();
+  document.getElementById('btnFit').classList.toggle('brush-active', state.fitMode);
+  drawFitPreview();
+}
+function fitPoint(e) {
+  const rect = fitCanvas.getBoundingClientRect();
+  return [(e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom];
+}
+function fitLocalPoint(point, geometry) {
+  const dx = point[0] - geometry.cx, dy = point[1] - geometry.cy;
+  const angle = -Number(state.fitAngle) * Math.PI / 180;
+  const x = dx * Math.cos(angle) - dy * Math.sin(angle);
+  const y = dx * Math.sin(angle) + dy * Math.cos(angle);
+  return [state.fitFlip ? -x : x, y];
+}
+fitCanvas.addEventListener('pointerdown', (e) => {
+  if (!state.fitMode) return;
+  const geometry = fitRect();
+  if (!geometry) return;
+  const local = fitLocalPoint(fitPoint(e), geometry);
+  const nearCorner = Math.abs(Math.abs(local[0]) - geometry.w / 2) < 14 / state.zoom
+    && Math.abs(Math.abs(local[1]) - geometry.h / 2) < 14 / state.zoom;
+  const rotationHandle = Math.abs(local[0]) < 14 / state.zoom
+    && Math.abs(local[1] + geometry.h / 2 + 30 / state.zoom) < 14 / state.zoom;
+  const inside = Math.abs(local[0]) <= geometry.w / 2 && Math.abs(local[1]) <= geometry.h / 2;
+  if (!inside && !nearCorner && !rotationHandle) return;
+  state.fitDrag = {
+    type: rotationHandle ? 'rotate' : nearCorner ? 'scale' : 'move',
+    start: fitPoint(e), startScale: state.fitScale, startAngle: state.fitAngle,
+  };
+  fitCanvas.setPointerCapture(e.pointerId);
+});
+fitCanvas.addEventListener('pointermove', (e) => {
+  if (!state.fitDrag) return;
+  const point = fitPoint(e);
+  const geometry = fitRect();
+  if (state.fitDrag.type === 'move') {
+    state.fitCenter = [
+      state.fitCenter[0] + point[0] - state.fitDrag.start[0],
+      state.fitCenter[1] + point[1] - state.fitDrag.start[1],
+    ];
+    state.fitDrag.start = point;
+  } else if (state.fitDrag.type === 'scale') {
+    const startDistance = Math.max(1, Math.hypot(
+      state.fitDrag.start[0] - geometry.cx, state.fitDrag.start[1] - geometry.cy,
+    ));
+    const distance = Math.hypot(point[0] - geometry.cx, point[1] - geometry.cy);
+    state.fitScale = Math.max(10, Math.min(400, state.fitDrag.startScale * distance / startDistance));
+    document.getElementById('fitScale').value = Math.round(state.fitScale);
+  } else {
+    let angle = Math.atan2(point[1] - geometry.cy, point[0] - geometry.cx) * 180 / Math.PI + 90;
+    if (e.shiftKey) angle = Math.round(angle / 15) * 15;
+    state.fitAngle = Math.max(-180, Math.min(180, angle));
+    document.getElementById('fitAngle').value = state.fitAngle;
+  }
+  updateFitHint();
+  drawFitPreview();
+});
+fitCanvas.addEventListener('pointerup', () => { state.fitDrag = null; });
+document.getElementById('btnFit').onclick = enterFit;
+document.getElementById('fitReset').onclick = resetFit;
+document.getElementById('fitScale').onchange = (e) => {
+  state.fitScale = Math.max(10, Math.min(400, +e.target.value || 100));
+  e.target.value = Math.round(state.fitScale);
+  updateFitHint(); drawFitPreview();
+};
+document.getElementById('fitAngle').onchange = (e) => {
+  state.fitAngle = Math.max(-180, Math.min(180, +e.target.value || 0));
+  e.target.value = state.fitAngle;
+  updateFitHint(); drawFitPreview();
+};
+document.getElementById('fitFlip').onchange = (e) => {
+  state.fitFlip = e.target.checked;
+  updateFitHint(); drawFitPreview();
+};
+roiModeSelect.onchange = () => {
+  // ROIを引ける状態にするため、手動に切り替えたら装着画像のプレビューへ移動する
+  if (isManualRoi() && !isRoiLayer(state.layer, 'a') && state.localUrls.local_with) showLayer('local_with');
+  updateRoiHint();
+  updateFitAvailability();
+};
+
+function fallbackToManualRoi() {
+  roiModeSelect.value = 'manual';
+  if (state.localUrls.local_with) showLayer('local_with');
+  updateRoiHint();
+  status('⚠ 顔を検出できませんでした（横顔・目のアップなど）。手動ROIに切り替えました。目元をドラッグして囲んだあと、もう一度「② 解析開始」を押してください。');
+}
+
+function armRoi(kind) {
+  if (!isManualRoi()) return;
+  if (state.fitMode) {
+    state.fitMode = false;
+    updateFitAvailability();
+  }
+  const target = kind === 'a'
+    ? (state.localUrls.local_with ? 'local_with' : 'source_with')
+    : (state.localUrls.local_edited ? 'local_edited' : 'source_edited');
+  const options = [...document.getElementById('layerSelect').options].map(o => o.value);
+  const available = state.localUrls[target] || options.includes(target);
+  if (!available) {
+    if (kind === 'b') status('編集済み画像を選択してください');
+    return;
+  }
+  state.activeRoi = kind;
+  setBrush(null, null);
+  showLayer(target);
+  updateRoiHint();
+}
+document.getElementById('roiBtnA').onclick = () => armRoi('a');
+document.getElementById('roiBtnB').onclick = () => armRoi('b');
+document.getElementById('roiClear').onclick = () => {
+  state.roiA = null; state.roiB = null;
+  state.activeRoi = null;
+  updateRoiHint();
+};
+roiShow.onchange = () => { drawRoiOverlay(); drawFitPreview(); };
+window.addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() !== 'h' || /input|textarea|select/i.test(e.target.tagName)) return;
+  roiShow.checked = !roiShow.checked;
+  drawRoiOverlay();
+  drawFitPreview();
+});
+window.addEventListener('keydown', (e) => {
+  if (!state.fitMode || /input|textarea|select/i.test(e.target.tagName)) return;
+  if (e.key === 'Escape') {
+    state.fitMode = false;
+    updateFitAvailability();
+    document.getElementById('btnFit').classList.remove('brush-active');
+    drawFitPreview();
+    return;
+  }
+  if (e.key === '[' || e.key === ']') {
+    e.preventDefault();
+    state.fitAngle = Math.max(-180, Math.min(180, state.fitAngle + (e.key === '[' ? -1 : 1)));
+  } else if (e.key === '-' || e.key === '+') {
+    e.preventDefault();
+    state.fitScale = Math.max(10, Math.min(400, state.fitScale + (e.key === '-' ? -1 : 1)));
+  } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+    e.preventDefault();
+    const step = e.shiftKey ? 10 : 1;
+    const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+    const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+    state.fitCenter = [state.fitCenter[0] + dx, state.fitCenter[1] + dy];
+  } else return;
+  document.getElementById('fitScale').value = Math.round(state.fitScale);
+  document.getElementById('fitAngle').value = state.fitAngle;
+  updateFitHint();
+  drawFitPreview();
+});
+
+function imagePoint(e) {
+  const rect = baseCanvas.getBoundingClientRect();
+  return [(e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom];
+}
+
+let roiDragging = false;
+canvasWrap.addEventListener('pointerdown', (e) => {
+  if (!isManualRoi() || !state.activeRoi || !isRoiLayer(state.layer, state.activeRoi)) return;
+  const [x, y] = imagePoint(e);
+  const rect = [x, y, x, y];
+  if (state.activeRoi === 'a') state.roiA = rect;
+  else state.roiB = rect;
+  roiDragging = true;
+  updateRoiHint();
+});
+canvasWrap.addEventListener('pointermove', (e) => {
+  if (!roiDragging) return;
+  const [x, y] = imagePoint(e);
+  const rect = state.activeRoi === 'a' ? state.roiA : state.roiB;
+  rect[2] = x; rect[3] = y;
+  updateRoiHint();
+});
+window.addEventListener('pointerup', () => {
+  if (!roiDragging) return;
+  roiDragging = false;
+  if (state.activeRoi === 'b') initializeFitCenter(true);
+  state.activeRoi = null;
+  updateRoiHint();
+});
+updateRoiHint();
 
 let paintBackup = null;
 const undoStack = [], redoStack = [];
@@ -283,11 +652,17 @@ document.getElementById('btnUpload').onclick = async () => {
   fd.append('image_with', fw);
   const fo = document.getElementById('fileWithout').files[0];
   if (fo) fd.append('image_without', fo);
-  status('解析中…（顔検出・位置合わせ・差分計算）');
+  if (isManualRoi()) {
+    if (!state.roiA) { status('ROI-A 指定を押して装着画像でROIを囲んでください'); return; }
+    fd.append('roi_rect', state.roiA.map(Math.round).join(','));
+  }
+  status(isManualRoi() ? '解析中…（手動ROI・差分計算）' : '解析中…（顔検出・位置合わせ・差分計算）');
   let data;
   try {
     data = await postForm('/api/session', fd);
   } catch (e) {
+    // 横顔・目のアップで顔検出が失敗するのは想定内。行き止まりにせず手動ROIに誘導する
+    if (!isManualRoi() && /no face/.test(e.message)) { fallbackToManualRoi(); return; }
     status('エラー: ' + e.message);
     return;
   }
@@ -295,6 +670,9 @@ document.getElementById('btnUpload').onclick = async () => {
   state.w = data.width; state.h = data.height;
   state.strokes = [];
   paintBackup = null;
+  fitImage = null;
+  state.productBBox = null;
+  state.fitMode = false;
   resetHistory();
   pctx.clearRect(0, 0, 4096, 4096);
   setLayerOptions(data.layers);
@@ -310,6 +688,20 @@ async function resumeSession(sid) {
   const data = await res.json();
   state.session = sid;
   state.w = data.width; state.h = data.height;
+  roiModeSelect.value = data.mode === 'manual' ? 'manual' : 'auto';
+  state.roiA = data.roi_rect || null;
+  state.roiB = data.dest_rect || null;
+  state.productBBox = data.product_bbox || null;
+  state.fitAngle = data.dest_angle || 0;
+  state.fitFlip = !!data.dest_flip;
+  state.fitScale = 100;
+  state.fitMode = false;
+  fitImage = null;
+  initializeFitCenter(true);
+  document.getElementById('fitScale').value = state.fitScale;
+  document.getElementById('fitAngle').value = state.fitAngle;
+  document.getElementById('fitFlip').checked = state.fitFlip;
+  updateRoiHint();
   paintBackup = null;
   resetHistory();
   // ストロークの再生前に表示を待つ（onload が paintCanvas をリサイズして中身を消すため）
@@ -351,6 +743,7 @@ document.getElementById('btnArchiveRestore').onclick = async () => {
 };
 
 function setBrush(mode, btn) {
+  if (state.fitMode && mode) return;
   state.brush = mode;
   for (const id of ['btnAdd', 'btnUnknown', 'btnRemove', 'btnNone'])
     document.getElementById(id).classList.remove('brush-active');
@@ -431,12 +824,35 @@ document.getElementById('btnRecompose').onclick = async () => {
   if (!state.session) { status('まだセッションがありません。装着画像を選んで「解析開始」を押してください'); return; }
   const fe = document.getElementById('fileEdited').files[0];
   if (!fe) { status('編集済み画像を選択してください'); return; }
-  status('再合成中…（顔検出・位置合わせ・Alpha合成）');
+  if (isManualRoi() && !state.roiB) {
+    status('加工画像で ROI-B を指定してください');
+    armRoi('b');
+    return;
+  }
+  status(isManualRoi() ? '再合成中…（ROI-Bへ貼付）' : '再合成中…（顔検出・位置合わせ・Alpha合成）');
   const fd = new FormData();
   fd.append('session_id', state.session);
   fd.append('edited_image', fe);
+  if (isManualRoi() && state.roiB) {
+    const geometry = fitRect();
+    const rect = geometry
+      ? [geometry.cx - geometry.w / 2, geometry.cy - geometry.h / 2, geometry.cx + geometry.w / 2, geometry.cy + geometry.h / 2]
+      : state.roiB;
+    fd.append('dest_rect', rect.map(Math.round).join(','));
+    fd.append('angle', String(state.fitAngle));
+    fd.append('flip', String(state.fitFlip));
+  }
   try {
-    await postForm('/api/recompose', fd);
+    const result = await postForm('/api/recompose', fd);
+    if (result.dest_rect) {
+      state.roiB = result.dest_rect;
+      state.fitScale = 100;
+      initializeFitCenter(true);
+      document.getElementById('fitScale').value = state.fitScale;
+    }
+    if (result.product_bbox) state.productBBox = result.product_bbox;
+    state.fitAngle = result.angle || 0;
+    state.fitFlip = !!result.flip;
   } catch (e) {
     status('エラー: ' + e.message);
     return;
@@ -448,6 +864,7 @@ document.getElementById('btnRecompose').onclick = async () => {
   setLayerOptions(layers);
   sel.value = 'composite_on_edited';
   showLayer('composite_on_edited');
+  updateFitHint();
   status('再合成完了。「表示中レイヤーを保存」でダウンロードできます。');
 };
 

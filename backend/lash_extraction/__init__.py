@@ -21,12 +21,21 @@ from backend.lash_extraction.matting import (
     reconstruction_error,
     run_matting,
 )
-from backend.lash_extraction.roi import MAX_ROI_WIDTH, EyeRoi, compute_eye_roi, crop_roi
+from backend.lash_extraction.product import product_bbox
+from backend.lash_extraction.roi import (
+    MAX_ROI_WIDTH,
+    MIN_ROI_SIDE,
+    EyeRoi,
+    compute_eye_roi,
+    crop_roi,
+    manual_eye_roi,
+)
 
 __all__ = [
     "ALIGN_POINTS",
     "LEFT_EYE",
     "MAX_ROI_WIDTH",
+    "MIN_ROI_SIDE",
     "RIGHT_EYE",
     "EyeRoi",
     "align_b_to_a",
@@ -41,6 +50,8 @@ __all__ = [
     "eye_prior",
     "get_landmarker",
     "initial_probability",
+    "manual_eye_roi",
+    "product_bbox",
     "recompose_onto",
     "reconstruction_error",
     "run_matting",

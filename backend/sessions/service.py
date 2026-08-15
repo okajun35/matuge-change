@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from math import isfinite
 from typing import Any
 
+import cv2
 import numpy as np
 
 from backend.lash_extraction import (
@@ -21,6 +23,8 @@ from backend.lash_extraction import (
     ecc_refine,
     eye_prior,
     initial_probability,
+    manual_eye_roi,
+    product_bbox,
     recompose_onto,
     reconstruction_error,
     run_matting,
@@ -39,25 +43,36 @@ class SessionService:
     def __init__(self, store: SessionStore) -> None:
         self.store = store
 
-    def create(self, img_a: np.ndarray, img_b: np.ndarray | None) -> dict[str, Any]:
+    def create(
+        self,
+        img_a: np.ndarray,
+        img_b: np.ndarray | None,
+        roi_rect: tuple[float, float, float, float] | None = None,
+    ) -> dict[str, Any]:
+        """Start a session. `roi_rect` gives the eye region for images without a
+        detectable face (profiles, eye close-ups); otherwise landmarks locate it."""
         lms_a = detect_landmarks(img_a)
-        if lms_a is None:
+        if roi_rect is None and lms_a is None:
             raise FaceNotDetected("no face detected in the worn image")
 
-        roi = compute_eye_roi(lms_a, img_a.shape)
+        manual = roi_rect is not None
+        roi = manual_eye_roi(roi_rect, img_a.shape) if manual else compute_eye_roi(lms_a, img_a.shape)
         roi_a = crop_roi(img_a, roi)
 
         roi_b = None
         if img_b is not None:
             lms_b = detect_landmarks(img_b)
-            if lms_b is None:
+            if lms_b is None and not manual:
                 raise FaceNotDetected("no face detected in the bare image")
-            roi_b = ecc_refine(roi_a, crop_roi(align_b_to_a(img_a, lms_a, img_b, lms_b), roi))
+            aligned = img_b if lms_a is None or lms_b is None else align_b_to_a(img_a, lms_a, img_b, lms_b)
+            roi_b = ecc_refine(roi_a, crop_roi(aligned, roi))
             evidence = difference_map(roi_a, roi_b)
         else:
             evidence = darkness_map(roi_a)
 
-        prob = initial_probability(evidence, eye_prior(roi_a.shape, lms_a, roi))
+        # no landmarks -> no eye prior to restrict the evidence with
+        prior = np.ones(roi_a.shape[:2]) if lms_a is None else eye_prior(roi_a.shape, lms_a, roi)
+        prob = initial_probability(evidence, prior)
 
         session_id = self.store.create()
         # the uploads themselves are kept so a session can be re-derived later
@@ -70,7 +85,8 @@ class SessionService:
         self.store.save_gray(session_id, "difference", evidence)
         self.store.save_gray(session_id, "probability", prob)
         self.store.save_array(session_id, "probability", prob)
-        self.store.save_array(session_id, "landmarks", lms_a)
+        if lms_a is not None:
+            self.store.save_array(session_id, "landmarks", lms_a)
         self.store.save_meta(
             session_id,
             {
@@ -79,6 +95,7 @@ class SessionService:
                 "has_bare": roi_b is not None,
                 "width": roi_a.shape[1],
                 "height": roi_a.shape[0],
+                "mode": "manual" if manual else "auto",
             },
         )
 
@@ -94,6 +111,7 @@ class SessionService:
             "width": roi_a.shape[1],
             "height": roi_a.shape[0],
             "has_bare": roi_b is not None,
+            "mode": "manual" if manual else "auto",
             "layers": layers,
         }
 
@@ -124,6 +142,10 @@ class SessionService:
         self.store.save_image(session_id, "trimap", trimap)
         self.store.save_gray(session_id, "alpha", alpha)
         self.store.save_image(session_id, "product_rgba", rgba)
+        bbox = product_bbox(rgba)
+        meta = self.store.load_meta(session_id)
+        meta["product_bbox"] = [int(v) for v in bbox] if bbox is not None else None
+        self.store.save_meta(session_id, meta)
 
         layers = ["trimap", "alpha", "product_rgba"]
         if self.store.has_layer(session_id, "roi_b"):
@@ -153,18 +175,120 @@ class SessionService:
         self.store.require(session_id)
         return self.store.load_runs(session_id)
 
-    def recompose(self, session_id: str, edited: np.ndarray) -> dict[str, Any]:
+    def recompose(
+        self,
+        session_id: str,
+        edited: np.ndarray,
+        dest_rect: tuple[float, float, float, float] | None = None,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> dict[str, Any]:
         self.store.require(session_id)
         if not self.store.has_layer(session_id, "product_rgba"):
             raise MatteNotReady("run matting first")
-        self.store.save_image(session_id, "source_edited", edited)
+        if not isfinite(angle) or not -180 <= angle <= 180:
+            raise ValueError("angle must be finite and between -180 and 180 degrees")
+        if dest_rect is None and (angle != 0 or flip):
+            raise ValueError("angle and flip require dest_rect")
         rgba = self.store.load_image(session_id, "product_rgba", flags=-1)
+        if dest_rect is not None:
+            roi = manual_eye_roi(dest_rect, edited.shape)
+            out = self._recompose_into_rect(rgba, edited, roi, angle, flip)
+            self.store.save_image(session_id, "source_edited", edited)
+            self.store.save_image(session_id, "composite_on_edited", out)
+            meta = self.store.load_meta(session_id)
+            normalized = [roi.x0, roi.y0, roi.x1, roi.y1]
+            meta["dest_rect"] = normalized
+            meta["dest_angle"] = float(angle)
+            meta["dest_flip"] = bool(flip)
+            bbox = product_bbox(rgba)
+            meta["product_bbox"] = [int(v) for v in bbox] if bbox is not None else None
+            self.store.save_meta(session_id, meta)
+            return {
+                "layers": ["composite_on_edited"],
+                "dest_rect": normalized,
+                "angle": float(angle),
+                "flip": bool(flip),
+                "product_bbox": meta["product_bbox"],
+            }
+        if not self.store.has_array(session_id, "landmarks"):
+            raise FaceNotDetected(
+                "this session has no face landmarks (manual ROI): recompose needs a detected face"
+            )
+        self.store.save_image(session_id, "source_edited", edited)
         lms_worn = self.store.load_array(session_id, "landmarks")
         out = recompose_onto(rgba, self.roi_of(session_id), lms_worn, edited)
         if out is None:
             raise FaceNotDetected("no face detected in the edited image")
         self.store.save_image(session_id, "composite_on_edited", out)
         return {"layers": ["composite_on_edited"]}
+
+    @staticmethod
+    def _recompose_into_rect(
+        rgba: np.ndarray,
+        edited: np.ndarray,
+        roi: EyeRoi,
+        angle: float = 0.0,
+        flip: bool = False,
+    ) -> np.ndarray:
+        """Fit and similarity-transform RGBA product pixels into a destination rectangle."""
+        bbox = product_bbox(rgba)
+        if bbox is not None:
+            x0, y0, x1, y1 = bbox
+            rgba = rgba[y0:y1, x0:x1]
+        if flip:
+            rgba = cv2.flip(rgba, 1)
+        target_w, target_h = roi.x1 - roi.x0, roi.y1 - roi.y0
+        src_h, src_w = rgba.shape[:2]
+        scale = min(target_w / src_w, target_h / src_h)
+        fit_w = max(1, round(src_w * scale))
+        fit_h = max(1, round(src_h * scale))
+
+        color = rgba[:, :, :3].astype(np.float32)
+        alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+        premultiplied = np.dstack((color * alpha[:, :, None], alpha))
+        interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LANCZOS4
+        transformed = cv2.resize(premultiplied, (fit_w, fit_h), interpolation=interpolation)
+        radians = np.deg2rad(-angle)
+        cos_a, sin_a = abs(np.cos(radians)), abs(np.sin(radians))
+        rotated_w = max(1, int(np.ceil(fit_w * cos_a + fit_h * sin_a)))
+        rotated_h = max(1, int(np.ceil(fit_w * sin_a + fit_h * cos_a)))
+        if angle:
+            center = (fit_w / 2, fit_h / 2)
+            matrix = cv2.getRotationMatrix2D(center, -angle, 1.0)
+            matrix[0, 2] += (rotated_w - fit_w) / 2
+            matrix[1, 2] += (rotated_h - fit_h) / 2
+            transformed = cv2.warpAffine(
+                transformed,
+                matrix,
+                (rotated_w, rotated_h),
+                flags=cv2.INTER_LANCZOS4,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            )
+        resized_alpha = np.clip(transformed[:, :, 3], 0, 1)
+        resized_color = np.zeros_like(transformed[:, :, :3])
+        np.divide(
+            transformed[:, :, :3],
+            resized_alpha[:, :, None],
+            out=resized_color,
+            where=resized_alpha[:, :, None] > 1e-6,
+        )
+
+        out = edited.astype(np.float32).copy()
+        cx = (roi.x0 + roi.x1) / 2
+        cy = (roi.y0 + roi.y1) / 2
+        x = round(cx - transformed.shape[1] / 2)
+        y = round(cy - transformed.shape[0] / 2)
+        ox0, oy0 = max(0, x), max(0, y)
+        ox1, oy1 = min(out.shape[1], x + transformed.shape[1]), min(out.shape[0], y + transformed.shape[0])
+        if ox0 < ox1 and oy0 < oy1:
+            sx0, sy0 = ox0 - x, oy0 - y
+            sx1, sy1 = sx0 + ox1 - ox0, sy0 + oy1 - oy0
+            background = out[oy0:oy1, ox0:ox1]
+            a = resized_alpha[sy0:sy1, sx0:sx1, None]
+            background[:] = resized_color[sy0:sy1, sx0:sx1] * a + background * (1 - a)
+        return np.clip(out, 0, 255).astype(np.uint8)
 
     def roi_of(self, session_id: str) -> EyeRoi:
         meta = self.store.load_meta(session_id)

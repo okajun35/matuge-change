@@ -30,6 +30,115 @@ class TestLocalPreview:
         assert "isLocalLayer" in page
 
 
+class TestRoiModeToggle:
+    """正面（自動顔検出）と横顔・目アップ（手動ROI）をUIで切り替えられること。"""
+
+    def test_mode_selector_exists(self):
+        page = _page()
+        assert "roiMode" in page
+        assert "manual" in page and "auto" in page
+
+    def test_manual_mode_sends_the_drawn_rect(self):
+        page = _page()
+        assert "roi_rect" in page
+        assert "roiA" in page and "roiB" in page
+
+    def test_rect_is_drawn_on_the_local_preview(self):
+        page = _page()
+        # 解析前のローカルプレビュー上でドラッグしてROIを決める
+        assert "roiOverlay" in page
+
+    def test_auto_mode_defaults_and_falls_back_to_manual_when_no_face_is_found(self):
+        page = _page()
+        # デフォルトは自動（selectの先頭がauto）
+        assert page.index('value="auto"') < page.index('value="manual"')
+        # 顔検出できなかったときはエラーで止めず、手動ROIへ切り替えて案内する
+        assert "fallbackToManualRoi" in page
+        assert "no face" in page
+
+    def test_manual_roi_a_and_b_controls_are_present(self):
+        page = _page()
+        for marker in ("roiBtnA", "roiBtnB", "roiClear", "roiShow"):
+            assert marker in page
+        assert "ROI-A 指定（装着画像）" in page
+        assert "ROI-B 指定（加工画像）" in page
+
+    def test_manual_roi_overlay_colors_and_recompose_dest_rect(self):
+        page = _page()
+        assert "#00e5ff" in page and "#ff9f1c" in page
+        assert "roiOverlayA" in page and "roiOverlayB" in page
+        assert "dest_rect" in page
+        assert "加工画像で ROI-B を指定してください" in page
+
+    def test_arming_roi_refreshes_button_and_hint_immediately(self):
+        page = _page()
+        assert "showLayer(target);\n  updateRoiHint();" in page
+        assert "state.activeRoi = null;\n  updateRoiHint();" in page
+        assert "roiModeSelect.onchange" in page and "updateRoiHint();" in page
+
+    def test_show_layer_keeps_layer_selector_in_sync(self):
+        page = _page()
+        assert "document.getElementById('layerSelect').value = name;" in page
+
+    def test_manual_fit_controls_exist(self):
+        page = _page()
+        for marker in ("btnFit", "fitCanvas", "fitScale", "fitAngle", "左右反転", "fitReset"):
+            assert marker in page
+
+    def test_fit_canvas_is_overlay_inside_canvas_wrap(self):
+        page = _page()
+        assert '<canvas id="fitCanvas"></canvas>' in page
+        assert page.index('<div id="canvasWrap">') < page.index('<canvas id="fitCanvas"></canvas>')
+        assert "fitCanvas.width = paintCanvas.width" not in page
+
+    def test_recompose_sends_angle_and_flip(self):
+        page = _page()
+        assert "fd.append('angle'" in page
+        assert "fd.append('flip'" in page
+
+    def test_fit_keyboard_shortcuts_skip_focused_inputs(self):
+        page = _page()
+        assert "/input|textarea|select/i.test(e.target.tagName)" in page
+        assert "fitMode" in page
+
+    def test_fit_rotation_handle_hit_test_matches_drawn_position(self):
+        page = _page()
+        assert "local[1] + geometry.h / 2 + 30 / state.zoom" in page
+
+    def test_fit_center_is_initialized_when_fit_starts_and_roi_changes(self):
+        page = _page()
+        assert "function initializeFitCenter(force = false)" in page
+        assert "initializeFitCenter();" in page
+
+    def test_fit_result_resets_scale_and_center(self):
+        page = _page()
+        assert "state.fitScale = 100;" in page
+        assert "state.fitCenter = [(state.roiB[0] + state.roiB[2]) / 2" in page
+
+    def test_fit_exit_keeps_available_controls_visible(self):
+        page = _page()
+        assert "state.fitMode = false;\n    updateFitAvailability();" in page
+        assert page.count("state.fitMode = false;\n    updateFitAvailability();") >= 2
+
+    def test_fit_drag_starts_only_inside_transformed_frame(self):
+        page = _page()
+        assert "const inside = Math.abs(local[0]) <= geometry.w / 2" in page
+        assert "if (!inside && !nearCorner && !rotationHandle) return;" in page
+
+    def test_resume_resets_fit_scale_input(self):
+        page = _page()
+        assert "state.fitScale = 100;" in page
+        assert "document.getElementById('fitScale').value = state.fitScale;" in page
+
+    def test_fit_availability_updates_before_layer_image_load(self):
+        page = _page()
+        assert "state.layer = name;\n  updateFitAvailability();" in page
+
+    def test_fit_availability_updates_when_layer_image_fails(self):
+        page = _page()
+        assert "img.onerror = () => {\n      updateFitAvailability();" in page
+
+
 class TestRestoredStrokesArePainted:
     def test_strokes_are_replayed_after_the_layer_image_finished_loading(self):
         page = _page()

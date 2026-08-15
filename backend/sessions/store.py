@@ -37,6 +37,9 @@ class SessionStore:
     def has_layer(self, session_id: str, name: str) -> bool:
         return os.path.exists(self.path(session_id, f"{name}.png"))
 
+    def has_array(self, session_id: str, name: str) -> bool:
+        return os.path.exists(self.path(session_id, f"{name}.npy"))
+
     def layer_path(self, session_id: str, name: str) -> str:
         return self.path(session_id, f"{name}.png")
 

@@ -19,6 +19,7 @@
 | 機能 | 場所 | 備考 |
 | --- | --- | --- |
 | 静止画抽出（差分推定→Trimap→Matting→Product RGBA） | `backend/lash_extraction/`, `/extract.html` | 未装着画像なしでも暗部ベースで動く |
+| 手動ROIモード（横顔・目のアップ） | `/api/session` の `roi_rect`, `/extract.html` | 顔検出とeye_priorをスキップ。下記 §8 |
 | 3値ブラシ（＋商品 / ？中間 / −背景） | `frontend/extract.html` | 中間は Trimap の Unknown=128 を強制 |
 | Undo/Redo | `frontend/extract.html` | DB不要。Canvasスナップショットをメモリに積むだけ |
 | セッション永続化・再開 | `backend/sessions/` | `data/<session-id>/`。ストロークはベクタ保存 |
@@ -80,7 +81,37 @@
 
 ## 7. 未検証・今後の課題
 
+- 手動ROIモードの実写検証（横顔画像でのAlpha品質）
 - 実際の「まばたきする実動画」での動画モード検証（合成動画では数値確認済み）
 - AI加工API（Gemini/FLUX）の Adapter 実装 — APIキー未提供
 - 抽出Alphaに虹彩付近が混ざることがある（`−背景`ブラシで除外して再抽出する運用）
 - 表情変化が大きい動画向け Phase 2/3（マスク伝播・temporal smoothing・SAM2/MatAnyone）
+- 横顔の自動ROI（片目のみのROI/prior＋yaw耐性のあるランドマーク）
+
+## 8. 横顔・目のアップは顔検出が使えない（手動ROIモードの理由）
+
+実写の横顔（ほぼ真横）2枚で計測した結果、MediaPipe Face Landmarker は**1点も検出できない**:
+
+- 3000 / 2000 / 1280 / 800 / 512px、±15/30°回転、顔だけクロップ、左右反転すべて検出0件
+- `min_face_detection_confidence` を 0.5 → 0.01 まで下げても0件。閾値や解像度の問題ではなく検出器（BlazeFace系）の適用範囲外
+
+さらにランドマークが取れても下流が両目前提で崩れる:
+
+- `compute_eye_roi` は左右両目のbbox → 片目しか見えない横顔ではROIが顔全体級に膨らみ、`MAX_ROI_WIDTH` で縮小されてまつ毛の解像度が落ちる
+- `eye_prior` は両目ポリゴンを塗る → 見えない側がノイズ prior になる
+- `recompose_onto` の `ALIGN_POINTS` affine は両目＋鼻が見えている前提
+
+そのため横顔・目のアップは**ユーザーが矩形でROIを与える手動ROIモード**で扱う:
+
+- `POST /api/session` に `roi_rect="x0,y0,x1,y1"`（元画像ピクセル）を渡すと顔検出をスキップし、prior無しで暗部/差分evidenceをそのまま probability にする
+- 用語は **ROI-A = 装着画像から抽出する範囲**、**ROI-B = 加工画像へ貼り付ける先の矩形**。UIには解析後も押せる `ROI-A 指定（装着画像）` / `ROI-B 指定（加工画像）` ボタン、`ROIクリア`、`ROI枠を表示` チェックボックス（キーボード `H` でも切替）を置く。ROI-Aはシアン実線、ROI-Bはオレンジ破線で表示する
+- 解析後に結果レイヤーへ自動切替されると従来のROIドラッグ対象から外れ、さらにモードセレクタは既に `manual` のため `onchange` が発火せず、ROIを引き直せない不具合があった。ROI指定ボタンは適切な装着画像／加工画像レイヤーへ切り替えてドラッグをarmすることで、この落とし穴を避ける
+- `POST /api/recompose` に `dest_rect="x0,y0,x1,y1"`（加工画像ピクセル）を指定すると、顔検出・ランドマーク無しでROI-Bへ貼り付けられる。`product_rgba` は縦横比を維持してROI-Bに内接・中央配置し、アルファ前乗算してから拡縮する（ハロー防止）。回転・遠近変形には対応しない
+- 手動貼り付けのサイズ基準は、余白込みのROI-A矩形ではなく `product_bbox`（alpha実体の連結成分bbox）へ変更した。ROI-Aの引き方による余白量でまつ毛の貼付サイズが変わる問題を避け、まつ毛外形をROI-Bへ内接させるためである。`product_bbox` は Matting 完了時に `meta.json` へ保存する
+- 手動ROI-Bでは `angle`（時計回り、-180〜180度）と `flip`（左右反転）を指定でき、相似変換（移動・縦横比固定の拡縮・回転・反転）のみを行う。自由変形やパースペクティブは商品ピクセルを歪めるため採用しない。回転時はアルファ前乗算後、縮小なら `INTER_AREA` で先に縮小してから回転し、拡大なら `INTER_LANCZOS4` で回転付きリサンプルする
+- `dest_rect` 無しの経路は従来のlandmark affineのままで、landmarkが無ければ422になる既存挙動も残っている。したがって横顔同士の貼り付けはlandmark経路では成立せず、ROI-Bの手動指定が必要
+- `meta.json` の `mode` が `manual` / `auto`。`dest_rect` は `meta.json` に保存され、セッション取得時に復元できる
+- 実測では、実写の横顔2枚に加えて、いただいたAI加工画像（横顔）もMediaPipeでは検出0件だった。横顔同士はlandmark経路では成立しないため、ROI-A抽出後はROI-Bを手動指定する
+- trimap / closed-form matting / 3値ブラシは向きに依存しないので、ROIが決まれば横顔でもそのまま動く
+- UIのデフォルトは自動。自動で `no face` エラーが返ったらエラー表示で止めず、手動ROIへ自動フォールバックして案内する（`fallbackToManualRoi`）
+- 正面画像に手動ROIを使うのも可。顔が検出できれば `eye_prior` と `landmarks.npy` は自動モードと同じく効くので、`dest_rect` を使わない再合成も使える（手動ROIはROIの決め方だけを上書きする）

@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 
@@ -27,6 +28,15 @@ class TestGetSession:
 
     def test_unknown_session_returns_404(self, client):
         assert client.get("/api/sessions/nope").status_code == 404
+
+    def test_returns_persisted_dest_rect(self, client, session_id):
+        meta_path = os.path.join(DATA_DIR, session_id, "meta.json")
+        with open(meta_path) as f:
+            meta = json.load(f)
+        meta["dest_rect"] = [1, 2, 30, 40]
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+        assert client.get(f"/api/sessions/{session_id}").json()["dest_rect"] == [1, 2, 30, 40]
 
 
 class TestSessionArchiveApi:

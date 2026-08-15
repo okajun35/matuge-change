@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 import numpy as np
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -13,15 +15,57 @@ from backend.strokes.constraints import decode_constraints_png
 router = APIRouter(prefix="/api")
 
 
+def _rect(raw: str, name: str) -> tuple[float, float, float, float] | None:
+    """Parse a user-drawn rectangle; an empty value means it was not specified."""
+    if not raw.strip():
+        return None
+    parts = raw.split(",")
+    if len(parts) != 4:
+        raise HTTPException(400, f"{name} must be 'x0,y0,x1,y1'")
+    try:
+        x0, y0, x1, y1 = (float(p) for p in parts)
+    except ValueError as exc:
+        raise HTTPException(400, f"{name} must be four numbers") from exc
+    if not all(isfinite(v) for v in (x0, y0, x1, y1)):
+        raise HTTPException(400, f"{name} must be finite numbers")
+    return x0, y0, x1, y1
+
+
+def _roi_rect(raw: str) -> tuple[float, float, float, float] | None:
+    return _rect(raw, "roi_rect")
+
+
+def _transform_angle(raw: str) -> float | None:
+    if not raw.strip():
+        return None
+    try:
+        angle = float(raw)
+    except ValueError as exc:
+        raise HTTPException(400, "angle must be a finite number between -180 and 180") from exc
+    if not isfinite(angle) or not -180 <= angle <= 180:
+        raise HTTPException(400, "angle must be a finite number between -180 and 180")
+    return angle
+
+
+def _transform_flip(raw: str) -> bool | None:
+    if not raw.strip():
+        return None
+    if raw not in {"true", "false"}:
+        raise HTTPException(400, "flip must be 'true' or 'false'")
+    return raw == "true"
+
+
 @router.post("/session")
 async def create_session(
     image_with: UploadFile = File(...),
     image_without: UploadFile | None = File(None),
+    roi_rect: str = Form(""),
 ):
     img_a = read_upload(image_with)
     img_b = read_upload(image_without) if image_without is not None else None
+    rect = _roi_rect(roi_rect)
     try:
-        return container().sessions.create(img_a, img_b)
+        return container().sessions.create(img_a, img_b, rect)
     except Exception as exc:
         raise to_http(exc) from exc
 
@@ -65,6 +109,12 @@ async def get_session(session_id: str):
         "width": meta["width"],
         "height": meta["height"],
         "has_bare": meta["has_bare"],
+        "mode": meta.get("mode", "auto"),
+        "roi_rect": meta.get("roi"),
+        "dest_rect": meta.get("dest_rect"),
+        "dest_angle": meta.get("dest_angle", 0.0),
+        "dest_flip": meta.get("dest_flip", False),
+        "product_bbox": meta.get("product_bbox"),
         "layers": [name for name in LAYER_ORDER if store.has_layer(session_id, name)],
     }
 
@@ -153,9 +203,23 @@ async def get_matte_job(job_id: str):
 async def recompose(
     session_id: str = Form(...),
     edited_image: UploadFile = File(...),
+    dest_rect: str = Form(""),
+    angle: str = Form(""),
+    flip: str = Form(""),
 ):
     try:
-        return container().sessions.recompose(session_id, read_upload(edited_image))
+        rect = _rect(dest_rect, "dest_rect")
+        parsed_angle = _transform_angle(angle)
+        parsed_flip = _transform_flip(flip)
+        if rect is None and (parsed_angle is not None or parsed_flip is not None):
+            raise HTTPException(400, "angle and flip require dest_rect")
+        return container().sessions.recompose(
+            session_id,
+            read_upload(edited_image),
+            rect,
+            parsed_angle or 0.0,
+            parsed_flip or False,
+        )
     except Exception as exc:
         raise to_http(exc) from exc
 
