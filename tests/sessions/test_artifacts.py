@@ -31,6 +31,12 @@ class TestSourcePersistence:
         sid = service.create(face_image, face_image.copy())["session_id"]
         assert service.store.has_layer(sid, "source_without")
 
+    def test_sources_are_offered_as_layers(self, service, face_image):
+        # UI の表示切替で元画像をそのまま確認できる必要がある
+        assert "source_with" in service.create(face_image, None)["layers"]
+        both = service.create(face_image, face_image.copy())["layers"]
+        assert {"source_with", "source_without"} <= set(both)
+
     def test_edited_image_is_kept(self, service, face_image):
         sid = service.create(face_image, None)["session_id"]
         service.run_matte(sid, None)

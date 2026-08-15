@@ -39,6 +39,9 @@ def _constraints(session_id: str, constraints_png: str, use_saved_strokes: bool)
 LAYER_ORDER = (
     "roi_a",
     "roi_b",
+    "source_with",
+    "source_without",
+    "source_edited",
     "difference",
     "probability",
     "trimap",
@@ -46,9 +49,6 @@ LAYER_ORDER = (
     "product_rgba",
     "composite_on_bare",
     "composite_on_edited",
-    "source_with",
-    "source_without",
-    "source_edited",
 )
 
 

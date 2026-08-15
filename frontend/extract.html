@@ -117,6 +117,8 @@ function setLayerOptions(layers) {
   showLayer(sel.value);
 }
 
+const isSourceLayer = (name) => name.startsWith('source_');
+
 function showLayer(name) {
   state.layer = name;
   const dl = document.getElementById('btnDownload');
@@ -124,10 +126,21 @@ function showLayer(name) {
   dl.setAttribute('download', `${name}.png`);
   const img = new Image();
   img.onload = () => {
-    baseCanvas.width = paintCanvas.width = state.w = img.width;
-    baseCanvas.height = paintCanvas.height = state.h = img.height;
-    stage.style.height = img.height + 'px';
-    stage.style.width = img.width + 'px';
+    // 元画像は目元ROIと解像度が違うので、ブラシ用キャンバスのサイズ（=制約PNGのサイズ）は変えない
+    const source = isSourceLayer(name);
+    baseCanvas.width = img.width;
+    baseCanvas.height = img.height;
+    if (!source) {
+      paintCanvas.width = state.w = img.width;
+      paintCanvas.height = state.h = img.height;
+    }
+    paintCanvas.style.display = source ? 'none' : 'block';
+    if (source) setBrush(null, null);
+    // 全身・全顔の元画像は等倍だと巨大なので幅に合わせて縮小表示する
+    baseCanvas.style.maxWidth = source ? '96vw' : 'none';
+    baseCanvas.style.height = 'auto';
+    stage.style.height = source ? 'auto' : img.height + 'px';
+    stage.style.width = source ? 'auto' : img.width + 'px';
     stage.classList.toggle('checker', name === 'product_rgba');
     bctx.clearRect(0, 0, img.width, img.height);
     bctx.drawImage(img, 0, 0);
@@ -318,6 +331,7 @@ document.getElementById('btnRecompose').onclick = async () => {
   }
   const sel = document.getElementById('layerSelect');
   const layers = [...sel.options].map(o => o.value);
+  if (!layers.includes('source_edited')) layers.push('source_edited');
   if (!layers.includes('composite_on_edited')) layers.push('composite_on_edited');
   setLayerOptions(layers);
   sel.value = 'composite_on_edited';
@@ -382,10 +396,10 @@ document.getElementById('btnMatte').onclick = async () => {
     }
     const job = state.supabase ? await followWithRealtime(jobId) : await followWithPolling(jobId);
     if (job.status === 'failed') { status('Matting 失敗: ' + job.error); return; }
-    const base = ['roi_a'];
-    if (document.getElementById('fileWithout').files[0]) base.push('roi_b');
-    const layers = [...base, 'difference', 'probability', ...job.result.layers];
     const prev = [...document.getElementById('layerSelect').options].map(o => o.value);
+    const base = ['roi_a'];
+    if (document.getElementById('fileWithout').files[0] || prev.includes('roi_b')) base.push('roi_b');
+    const layers = [...base, ...prev.filter(isSourceLayer), 'difference', 'probability', ...job.result.layers];
     if (prev.includes('composite_on_edited')) layers.push('composite_on_edited');
     setLayerOptions(layers);
     status(`Matting 完了。再合成誤差 (mean abs, 0-255): ${job.result.reconstruction_error.toFixed(2)}`);

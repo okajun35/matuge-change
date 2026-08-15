@@ -1,3 +1,11 @@
+import os
+
+import cv2
+import numpy as np
+
+from backend.app import DATA_DIR
+
+
 class TestGetSession:
     def test_returns_available_layers(self, client, session_id):
         body = client.get(f"/api/sessions/{session_id}").json()
@@ -7,6 +15,14 @@ class TestGetSession:
     def test_layers_grow_after_matting(self, client, matted_session):
         layers = client.get(f"/api/sessions/{matted_session}").json()["layers"]
         assert layers == ["roi_a", "trimap", "alpha", "product_rgba"]
+
+    def test_source_layers_are_listed_next_to_the_roi(self, client, session_id):
+        # UI の表示プルダウンで元画像を ROI の直後に選べるようにする
+        sdir = os.path.join(DATA_DIR, session_id)
+        for name in ("source_with", "source_without", "source_edited"):
+            cv2.imwrite(os.path.join(sdir, f"{name}.png"), np.zeros((10, 10, 3), np.uint8))
+        layers = client.get(f"/api/sessions/{session_id}").json()["layers"]
+        assert layers == ["roi_a", "source_with", "source_without", "source_edited"]
 
     def test_unknown_session_returns_404(self, client):
         assert client.get("/api/sessions/nope").status_code == 404
