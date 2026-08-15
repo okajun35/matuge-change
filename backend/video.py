@@ -15,7 +15,7 @@ import tempfile
 import cv2
 import numpy as np
 
-from backend.pipeline import ALIGN_POINTS, LEFT_EYE, RIGHT_EYE
+from backend.lash_extraction import ALIGN_POINTS, LEFT_EYE, RIGHT_EYE
 
 # Eye-aspect-ratio landmark indices (MediaPipe face mesh)
 _R_H = (33, 133)

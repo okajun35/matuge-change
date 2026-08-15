@@ -26,10 +26,17 @@ pre-commit run --all-files
 
 ## プロジェクト構成
 
-- `backend/pipeline.py` — 抽出パイプライン（landmark / ROI / 差分 / trimap / matting / 再合成）
-- `backend/app.py` — FastAPI（セッション・matte・recompose・画像配信）
-- `frontend/index.html` — SPA（Canvasブラシ補正UI）
-- `tests/` — pytest（API + pipeline）
+- `backend/lash_extraction/` — 抽出ドメイン（landmark / ROI / alignment / evidence / matting）
+- `backend/sessions/` — セッションの永続化とユースケース
+- `backend/catalog/` — 商品アセットカタログと形状記述子
+- `backend/jobs/` — Matting 非同期ジョブ
+- `backend/strokes/` — ブラシストローク（ベクタ保存・ラスタライズ）
+- `backend/infrastructure/` — Supabase アダプタ（未設定ならローカル実装）
+- `backend/video.py` — 動画モード（ベストフレーム選択・目元領域差し替え）
+- `backend/api/` — FastAPI ルータと合成ルート（`container.py`）
+- `backend/app.py` — FastAPI エントリポイント（ルータ登録のみ）
+- `frontend/index.html` — SPA（Canvasブラシ補正UI・動画モード）
+- `tests/` — pytest（API + ドメイン）
 - `models/face_landmarker.task` — MediaPipeモデル（コミットしない）
 - `data/` — セッションデータ（コミットしない）
 
