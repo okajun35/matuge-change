@@ -26,6 +26,14 @@ ruff format               # フォーマット
 pre-commit run --all-files
 ```
 
+ローカルに Python 環境を作らない場合は Docker で同じことができる（`Dockerfile.dev`）:
+
+```bash
+scripts/dev-docker.sh                                    # pytest
+scripts/dev-docker.sh ruff check
+scripts/dev-docker.sh python -m pytest tests/evaluation -q
+```
+
 ## プロジェクト構成
 
 - `backend/lash_extraction/` — 抽出ドメイン（landmark / ROI / alignment / evidence / matting）
@@ -41,9 +49,12 @@ pre-commit run --all-files
 - `frontend/extract.html` — 静止画モード（Canvasブラシ補正UI）
 - `frontend/video.html` — 動画モード
 - `frontend/common.css` — 3ページ共通スタイル
-- `tests/` — pytest（API + ドメイン）
+- `evaluation/` — Synthetic Benchmark（既存アルゴリズムの**計測専用**。`backend/` の挙動は変えない）
+- `scripts/` — CLI（`generate_benchmark.py` / `run_evaluation.py` / `dev-docker.sh`）
+- `tests/` — pytest（API + ドメイン + evaluation）
 - `models/face_landmarker.task` — MediaPipeモデル（コミットしない）
 - `data/` — セッションデータ（コミットしない）
+- `evaluation-data/` `evaluation-results/` — Benchmarkの入出力（コミットしない）
 
 ## 設計原則
 
@@ -60,6 +71,16 @@ pre-commit run --all-files
 - 表示専用レイヤーでは `paintCanvas` のサイズを変えない（ブラシ座標＝制約PNGの座標系が壊れる）
 - ズームは `#canvasWrap` の `transform: scale()`。ブラシ座標は `state.zoom` で割って画像座標へ戻す
 - レイヤー一覧の再構築でレイヤーを落とさない（再開時の `roi_b`、Matting再実行時の `composite_on_edited`）
+
+## Benchmark（`evaluation/`）のルール
+
+- **数値を良くするために production を変えない。** probability / matting / ROI / threshold /
+  evidence / alignment を触ってよいのは「アルゴリズムを改善する」PRだけで、計測PRでは触らない
+- 見つかった問題は修正せず `docs/benchmark-findings.md` に記録する
+- 合格ライン（Dice >= 0.9 等）は設けない。目的はベースラインの取得と回帰検出
+- 合成データは実写性能を証明しない。限界は `evaluation/README.md` §8 に書いてある
+- `warp_product(interpolation="linear", premultiply=False)` が本番 `recompose_onto` と
+  ビット一致することをテストで担保している。本番を変えたらこのテストが落ちる（＝計測対象のズレ検知）
 
 ## その他ルール
 
