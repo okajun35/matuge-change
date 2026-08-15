@@ -82,7 +82,13 @@ class SessionService:
             },
         )
 
-        layers = ["roi_a"] + (["roi_b"] if roi_b is not None else []) + ["difference", "probability"]
+        layers = (
+            ["roi_a"]
+            + (["roi_b"] if roi_b is not None else [])
+            + ["source_with"]
+            + (["source_without"] if img_b is not None else [])
+            + ["difference", "probability"]
+        )
         return {
             "session_id": session_id,
             "width": roi_a.shape[1],
