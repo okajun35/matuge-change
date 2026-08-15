@@ -35,7 +35,10 @@ pre-commit run --all-files
 - `backend/video.py` — 動画モード（ベストフレーム選択・目元領域差し替え）
 - `backend/api/` — FastAPI ルータと合成ルート（`container.py`）
 - `backend/app.py` — FastAPI エントリポイント（ルータ登録のみ）
-- `frontend/index.html` — SPA（Canvasブラシ補正UI・動画モード）
+- `frontend/index.html` — カタログ画面（`/`）
+- `frontend/extract.html` — 静止画モード（Canvasブラシ補正UI）
+- `frontend/video.html` — 動画モード
+- `frontend/common.css` — 3ページ共通スタイル
 - `tests/` — pytest（API + ドメイン）
 - `models/face_landmarker.task` — MediaPipeモデル（コミットしない）
 - `data/` — セッションデータ（コミットしない）

@@ -143,3 +143,33 @@ class TestGetImage:
         res = client.get(f"/api/image/{fake_session}/roi_a")
         assert res.status_code == 200
         assert res.headers["content-type"] == "image/png"
+
+
+class TestPages:
+    """カタログ / 静止画モード / 動画モードはページとして分かれている。"""
+
+    def test_root_serves_catalog(self):
+        res = client.get("/")
+        assert res.status_code == 200
+        assert "/api/assets" in res.text
+        assert "/extract.html" in res.text
+        assert "/video.html" in res.text
+
+    def test_extract_page_has_static_mode_controls(self):
+        res = client.get("/extract.html")
+        assert res.status_code == 200
+        for marker in ("fileWith", "btnMatte", "btnRecompose", "btnUndo", "/api/matte/jobs"):
+            assert marker in res.text
+        assert "/api/video/" not in res.text
+
+    def test_video_page_has_video_mode_controls(self):
+        res = client.get("/video.html")
+        assert res.status_code == 200
+        for marker in ("fileVideo", "btnCompose", "/api/video/session", "/api/video/compose"):
+            assert marker in res.text
+        assert "btnMatte" not in res.text
+
+    def test_shared_stylesheet_served(self):
+        res = client.get("/common.css")
+        assert res.status_code == 200
+        assert "text/css" in res.headers["content-type"]
