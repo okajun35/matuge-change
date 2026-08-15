@@ -1,8 +1,10 @@
 """Video mode: best-frame selection and per-frame eye-region replacement compositing.
 
-The product (lash) pixels are never regenerated or deformed: one best frame is
-AI-edited externally, then each original frame's eye region — lashes, lids and
-their natural blink motion — is pasted back over the aligned edited image.
+The product (lash) pixels are reused as-is from the source frame: one best frame
+is AI-edited externally, then each original frame's eye region — lashes, lids and
+their natural blink motion — is pasted back over the edited image, which is the
+only side that gets warped. Compositing leaves the product pixels untransformed;
+the feathered mask border and the output H.264 re-encode are the only losses.
 """
 
 from __future__ import annotations
