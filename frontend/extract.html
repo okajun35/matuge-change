@@ -109,7 +109,7 @@
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
   strokes: [], current: null, supabase: null, channel: null,
-  zoom: 1, localUrls: {}, roiRect: null, roiA: null, roiB: null, activeRoi: null,
+  zoom: 1, localUrls: {}, roiA: null, roiB: null, activeRoi: null,
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
@@ -301,7 +301,7 @@ function updateRoiHint() {
 }
 roiModeSelect.onchange = () => {
   // ROIを引ける状態にするため、手動に切り替えたら装着画像のプレビューへ移動する
-  if (isManualRoi() && !isRoiLayer(state.layer) && state.localUrls.local_with) showLayer('local_with');
+  if (isManualRoi() && !isRoiLayer(state.layer, 'a') && state.localUrls.local_with) showLayer('local_with');
   updateRoiHint();
 };
 
@@ -314,18 +314,24 @@ function fallbackToManualRoi() {
 
 function armRoi(kind) {
   if (!isManualRoi()) return;
-  state.activeRoi = kind;
-  setBrush(null, null);
   const target = kind === 'a'
     ? (state.localUrls.local_with ? 'local_with' : 'source_with')
     : (state.localUrls.local_edited ? 'local_edited' : 'source_edited');
-  if (target && (state.localUrls[target] || state.session)) showLayer(target);
+  const options = [...document.getElementById('layerSelect').options].map(o => o.value);
+  const available = state.localUrls[target] || options.includes(target);
+  if (!available) {
+    if (kind === 'b') status('編集済み画像を選択してください');
+    return;
+  }
+  state.activeRoi = kind;
+  setBrush(null, null);
+  showLayer(target);
   drawRoiOverlay();
 }
 document.getElementById('roiBtnA').onclick = () => armRoi('a');
 document.getElementById('roiBtnB').onclick = () => armRoi('b');
 document.getElementById('roiClear').onclick = () => {
-  state.roiA = null; state.roiB = null; state.roiRect = null;
+  state.roiA = null; state.roiB = null;
   state.activeRoi = null;
   updateRoiHint();
 };
@@ -346,7 +352,7 @@ canvasWrap.addEventListener('pointerdown', (e) => {
   if (!isManualRoi() || !state.activeRoi || !isRoiLayer(state.layer, state.activeRoi)) return;
   const [x, y] = imagePoint(e);
   const rect = [x, y, x, y];
-  if (state.activeRoi === 'a') state.roiA = state.roiRect = rect;
+  if (state.activeRoi === 'a') state.roiA = rect;
   else state.roiB = rect;
   roiDragging = true;
   updateRoiHint();

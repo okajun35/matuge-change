@@ -41,7 +41,7 @@ class TestRoiModeToggle:
     def test_manual_mode_sends_the_drawn_rect(self):
         page = _page()
         assert "roi_rect" in page
-        assert "roiRect" in page
+        assert "roiA" in page and "roiB" in page
 
     def test_rect_is_drawn_on_the_local_preview(self):
         page = _page()

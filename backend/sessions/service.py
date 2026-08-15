@@ -178,10 +178,10 @@ class SessionService:
         self.store.require(session_id)
         if not self.store.has_layer(session_id, "product_rgba"):
             raise MatteNotReady("run matting first")
-        self.store.save_image(session_id, "source_edited", edited)
         rgba = self.store.load_image(session_id, "product_rgba", flags=-1)
         if dest_rect is not None:
             roi = manual_eye_roi(dest_rect, edited.shape)
+            self.store.save_image(session_id, "source_edited", edited)
             out = self._recompose_into_rect(rgba, edited, roi)
             self.store.save_image(session_id, "composite_on_edited", out)
             meta = self.store.load_meta(session_id)
@@ -193,6 +193,7 @@ class SessionService:
             raise FaceNotDetected(
                 "this session has no face landmarks (manual ROI): recompose needs a detected face"
             )
+        self.store.save_image(session_id, "source_edited", edited)
         lms_worn = self.store.load_array(session_id, "landmarks")
         out = recompose_onto(rgba, self.roi_of(session_id), lms_worn, edited)
         if out is None:

@@ -156,6 +156,18 @@ class TestRecompose:
         assert res.status_code == 422
         assert "no face" in res.json()["detail"]
 
+    def test_no_landmarks_without_dest_rect_has_no_source_side_effect(self, fake_session):
+        os.remove(os.path.join(DATA_DIR, fake_session, "landmarks.npy"))
+        client.post("/api/matte", data={"session_id": fake_session})
+        res = client.post(
+            "/api/recompose",
+            data={"session_id": fake_session},
+            files={"edited_image": ("e.png", encode_png(np.zeros((64, 64, 3), np.uint8)))},
+        )
+        assert res.status_code == 422
+        assert "landmarks" in res.json()["detail"]
+        assert not os.path.exists(os.path.join(DATA_DIR, fake_session, "source_edited.png"))
+
     def test_manual_dest_rect_recompose_does_not_need_landmarks(self, fake_session):
         os.remove(os.path.join(DATA_DIR, fake_session, "landmarks.npy"))
         client.post("/api/matte", data={"session_id": fake_session})

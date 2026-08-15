@@ -77,6 +77,7 @@ class TestRecomposeWithoutLandmarks:
         result = profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240))
 
         assert result["dest_rect"] == [100, 80, 300, 240]
+        assert profile_service.store.has_layer(sid, "source_edited")
         out = profile_service.store.load_image(sid, "composite_on_edited")
         assert out.shape == edited.shape
         # 2:1 product fitted into a 200x160 rectangle => 200x100, centered.
