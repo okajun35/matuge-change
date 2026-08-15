@@ -7,6 +7,7 @@ JSのテストランナーは持たないため、ページが備えるべき仕
 from __future__ import annotations
 
 import os
+import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -142,8 +143,11 @@ class TestRoiModeToggle:
         page = _page()
         # 条件付きで出たり消えたりすると見つけられないので、常時表示して非活性で示す
         assert '<span id="fitControls" style="display:none">' not in page
-        assert "controls.style.display" not in page
+        # 以前の display:none での出し入れに戻っていないこと
+        assert "controls.style.display = available" not in page
         assert ".disabled = !available" in page
+        # :has() 非対応ブラウザでも非活性の見た目が変わるよう、JS側でも opacity を設定する
+        assert "controls.style.opacity" in page
 
     def test_fit_controls_tooltip_explains_how_to_enable(self):
         page = _page()
@@ -172,6 +176,13 @@ class TestBrushVisibilityToggle:
         page = _page()
         # 非表示のまま描けると混乱するので、ブラシを選んだら表示に戻す
         assert "brushShow.checked = true" in page
+
+
+class TestValidHtmlStructure:
+    def test_no_buttons_nested_inside_links(self):
+        page = _page()
+        # <a> の中に <button> を入れるのは無効なHTML（インタラクティブ要素のネスト）
+        assert not re.search(r"<a[^>]*>\s*<button", page)
 
 
 class TestRestoredStrokesArePainted:

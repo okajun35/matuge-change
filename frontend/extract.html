@@ -9,9 +9,10 @@
   #controls .group { border: 1px solid #444; border-radius: 8px; margin: 0; padding: 4px 10px 8px;
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #controls legend { font-size: 12px; color: #9ab; padding: 0 4px; }
-  /* 非活性のときは全体を薄くして「今は使えない」ことを示す（理由はツールチップ） */
-  #fitControls:has(:disabled) { opacity: .5; }
   #viewBar { padding-top: 0; padding-bottom: 6px; background: transparent; }
+  /* ダウンロードリンクをボタンの見た目にする（<a>の中に<button>は無効なHTMLなので使わない） */
+  #btnDownload { display: inline-block; background: #555; color: #fff; border-radius: 6px;
+    padding: 6px 14px; font-size: 13px; text-decoration: none; cursor: pointer; }
   #stage { position: relative; margin: 0 auto 12px; overflow: auto; max-width: 98vw; height: 72vh; background: #111; }
   #canvasWrap { position: relative; transform-origin: 0 0; }
   canvas { position: absolute; left: 0; top: 0; image-rendering: auto; }
@@ -98,7 +99,7 @@
     <label>商品名 <input type="text" id="assetName" placeholder="ボリュームラッシュ D 0.07"></label>
     <label>ブランド <input type="text" id="assetBrand" placeholder="任意"></label>
     <button id="btnRegister">この抽出結果を商品として登録</button>
-    <a href="/"><button class="secondary">カタログを開く</button></a>
+    <button class="secondary" onclick="location.href='/'">カタログを開く</button>
     <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
   </fieldset>
 
@@ -126,7 +127,7 @@
     <button id="btnZoomFit" class="secondary">全体</button>
     <button id="btnZoomReset" class="secondary">100%</button>
   </label>
-  <a id="btnDownload" download><button class="secondary">表示中レイヤーを保存</button></a>
+  <a id="btnDownload" download>表示中レイヤーを保存</a>
 </div>
 
 <div id="stage">
@@ -400,6 +401,8 @@ function updateFitAvailability() {
         : 'ROI-Bの枠をドラッグで移動、四隅で拡縮、上のハンドルで回転できます';
   for (const id of ['btnFit', 'fitScale', 'fitAngle', 'fitFlip', 'fitReset'])
     document.getElementById(id).disabled = !available;
+  // 非活性のときは全体を薄くして「今は使えない」ことを示す（理由はツールチップ）
+  controls.style.opacity = available ? '' : '.5';
   if (!available) {
     state.fitMode = false;
     document.getElementById('btnFit').classList.remove('brush-active');
