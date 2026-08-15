@@ -33,7 +33,26 @@ Alpha Matte として抽出し、後段の AI モデル加工画像へ再合成�
   （まつ毛・まぶた・まばたきの動きごと）をフェザー付きで貼り戻して MP4 を出力
 - 商品ピクセルは一切変形・再生成しない（Level 3 Pixel Preserve）
 
-## セットアップ
+## セットアップ（Docker / WSL 推奨）
+
+Windows の WSL2（Docker Desktop でも可）で動かす場合は Docker だけで完結する。
+Python も MediaPipe モデルも用意不要。
+
+```bash
+git clone https://github.com/okajun35/matuge-change.git
+cd matuge-change
+docker compose up --build
+```
+
+ブラウザ（Windows 側）で http://localhost:8000 を開く。
+
+- 初回ビルドは依存のDLで数分かかる。起動後も MediaPipe / numba のインポートに
+  30〜60 秒かかるため、すぐ開けない場合は少し待つ（`docker compose ps` が healthy になれば準備完了）
+- 抽出結果・カタログはホスト側の `./data` に残る（コンテナを作り直しても消えない）
+- 停止は `docker compose down`、コード更新後は `docker compose up --build`
+- Supabase を使う場合は `.env` に `SUPABASE_URL` 等を書けば compose が読み込む（未設定なら `data/` のローカル実装で動く）
+
+## セットアップ（ローカル Python 環境）
 
 ```bash
 uv venv --python 3.11 .venv
