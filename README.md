@@ -20,6 +20,16 @@ Alpha Matte として抽出し、後段の AI モデル加工画像へ再合成�
 
 詳細は [docs/supabase-phase-b.md](docs/supabase-phase-b.md)。
 
+## 動画モード
+
+顔固定・まばたき動画向けの「目元領域まるごと差し替え方式」（[docs/video-approach.md](docs/video-approach.md)）。
+
+- 動画をフレーム分解し、目が開いていて鮮明なベストフレームを選択・出力
+- ベストフレームを外部 AI で加工（目元は変えないことを推奨）してアップロード
+- 各フレームへ AI 加工画像をランドマーク位置合わせし、元フレームの目元領域
+  （まつ毛・まぶた・まばたきの動きごと）をフェザー付きで貼り戻して MP4 を出力
+- 商品ピクセルは一切変形・再生成しない（Level 3 Pixel Preserve）
+
 ## セットアップ
 
 ```bash
@@ -30,12 +40,29 @@ curl -sL -o models/face_landmarker.task --create-dirs \
   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 ```
 
-## テスト
+## テスト・Lint
 
 ```bash
 uv pip install -r requirements-dev.txt
-python -m pytest tests/ -q
+python -m pytest          # テスト
+ruff check                # Lint
+ruff format               # フォーマット
 ```
+
+pre-commit（commit 時に自動で lint / format / 各種チェック）:
+
+```bash
+pre-commit install
+pre-commit run --all-files   # 手動で全ファイルにかける場合
+```
+
+GitHub Actions（`.github/workflows/ci.yml`）で PR / main push 時に
+`ruff check` / `ruff format --check` と `pytest` が実行される。
+
+## ドキュメント
+
+- [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
+- [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）
 
 ## 起動
 
@@ -58,7 +85,7 @@ export SUPABASE_SERVICE_ROLE_KEY=...   # サーバー専用（ブラウザへは
 export SUPABASE_PUBLISHABLE_KEY=...    # Realtime 購読用
 ```
 
-## 使い方
+## 使い方（静止画モード）
 
 1. 装着画像（必要なら未装着画像も）をアップロードして「解析開始」
 2. 表示レイヤーを Probability に切り替えて初期推定を確認
@@ -69,3 +96,11 @@ export SUPABASE_PUBLISHABLE_KEY=...    # Realtime 購読用
 7. 「表示中レイヤーを保存」で表示中の画像を PNG ダウンロード
 8. 商品名を入れて「この抽出結果を商品として登録」→ カタログのカードをクリックすると形状の近い商品を表示
 9. ブラシ補正はストローク単位で自動保存される。セッションID を入力して「再開」すると復元できる
+
+## 使い方（動画モード）
+
+1. 「動画モード」タブへ切り替え、動画を選択して「解析開始」
+2. 選択されたベストフレームを「ベストフレームを保存」でダウンロード
+3. 外部 AI でベストフレームを加工（目元は変えない指示を推奨）
+4. 加工済み画像を「AI加工済み画像」に選択し、必要なら「目元領域の広さ」を調整して「動画合成」
+5. 合成結果をプレビューし、「合成動画を保存」で MP4 ダウンロード

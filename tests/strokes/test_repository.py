@@ -28,7 +28,14 @@ class TestStrokeService:
         assert service.load("sess1").to_payload() == []
 
     def test_constraints_are_rebuilt_from_saved_strokes(self, service):
-        service.save("sess1", StrokeSet.from_payload(40, 40, [
-            {"tool": "bg", "radius": 4, "points": [[10, 10]]},
-        ]))
+        service.save(
+            "sess1",
+            StrokeSet.from_payload(
+                40,
+                40,
+                [
+                    {"tool": "bg", "radius": 4, "points": [[10, 10]]},
+                ],
+            ),
+        )
         assert service.load("sess1").rasterize()[10, 10] == -1

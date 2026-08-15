@@ -23,9 +23,7 @@ def build_trimap(
     """
     fg = prob >= fg_thresh
     maybe = prob >= bg_thresh
-    kernel = cv2.getStructuringElement(
-        cv2.MORPH_ELLIPSE, (2 * unknown_band_px + 1, 2 * unknown_band_px + 1)
-    )
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * unknown_band_px + 1, 2 * unknown_band_px + 1))
     unknown = cv2.dilate(maybe.astype(np.uint8), kernel).astype(bool)
     trimap = np.zeros(prob.shape, np.uint8)
     trimap[unknown] = 128
@@ -77,8 +75,12 @@ def recompose_onto(
     m_total = (np.vstack([m_ae, [0, 0, 1]]) @ m_roi_to_a)[:2]
     h, w = edited_bgr.shape[:2]
     warped = cv2.warpAffine(
-        rgba_roi, m_total, (w, h),
-        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+        rgba_roi,
+        m_total,
+        (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0, 0),
     )
     alpha = warped[..., 3:4].astype(np.float64) / 255.0
     fg = warped[..., :3].astype(np.float64) / 255.0

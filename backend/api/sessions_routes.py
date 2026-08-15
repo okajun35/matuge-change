@@ -26,9 +26,7 @@ async def create_session(
         raise to_http(exc) from exc
 
 
-def _constraints(
-    session_id: str, constraints_png: str, use_saved_strokes: bool
-) -> np.ndarray | None:
+def _constraints(session_id: str, constraints_png: str, use_saved_strokes: bool) -> np.ndarray | None:
     app = container()
     if use_saved_strokes:
         saved = app.strokes.load(session_id)
@@ -39,8 +37,15 @@ def _constraints(
 
 
 LAYER_ORDER = (
-    "roi_a", "roi_b", "difference", "probability", "trimap", "alpha",
-    "product_rgba", "composite_on_bare", "composite_on_edited",
+    "roi_a",
+    "roi_b",
+    "difference",
+    "probability",
+    "trimap",
+    "alpha",
+    "product_rgba",
+    "composite_on_bare",
+    "composite_on_edited",
 )
 
 
@@ -74,9 +79,7 @@ async def run_matte(
     try:
         app.sessions.store.require(session_id)
         constraints = _constraints(session_id, constraints_png, use_saved_strokes)
-        return app.sessions.run_matte(
-            session_id, constraints, fg_thresh, bg_thresh, unknown_band_px
-        )
+        return app.sessions.run_matte(session_id, constraints, fg_thresh, bg_thresh, unknown_band_px)
     except Exception as exc:
         raise to_http(exc) from exc
 

@@ -55,9 +55,7 @@ class LashDescriptor:
         gx = cv2.Sobel(a, cv2.CV_32F, 1, 0)
         gy = cv2.Sobel(a, cv2.CV_32F, 0, 1)
         angles = np.rad2deg(np.arctan2(gy, gx)) % 180.0
-        orientation = np.histogram(
-            angles, bins=_BLOCK, range=(0.0, 180.0), weights=cv2.magnitude(gx, gy)
-        )[0]
+        orientation = np.histogram(angles, bins=_BLOCK, range=(0.0, 180.0), weights=cv2.magnitude(gx, gy))[0]
 
         blocks = [columns, rows, opacity, orientation]
         unit = [b.astype(np.float32) / (np.linalg.norm(b) + 1e-8) for b in blocks]

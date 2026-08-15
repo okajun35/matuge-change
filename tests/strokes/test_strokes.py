@@ -29,15 +29,20 @@ class TestStroke:
 class TestStrokeSet:
     def test_from_payload_parses_all_strokes(self):
         strokes = StrokeSet.from_payload(
-            32, 16, [{"tool": "fg", "radius": 3, "points": [[4, 4]]},
-                     {"tool": "bg", "radius": 3, "points": [[20, 8]]}]
+            32,
+            16,
+            [
+                {"tool": "fg", "radius": 3, "points": [[4, 4]]},
+                {"tool": "bg", "radius": 3, "points": [[20, 8]]},
+            ],
         )
         assert len(strokes) == 2
         assert strokes.width == 32 and strokes.height == 16
 
     def test_rasterize_maps_tools_to_constraint_values(self):
         strokes = StrokeSet.from_payload(
-            40, 40,
+            40,
+            40,
             [
                 {"tool": "fg", "radius": 3, "points": [[5, 5]]},
                 {"tool": "unknown", "radius": 3, "points": [[20, 5]]},
@@ -54,7 +59,8 @@ class TestStrokeSet:
 
     def test_later_strokes_overwrite_earlier_ones(self):
         strokes = StrokeSet.from_payload(
-            20, 20,
+            20,
+            20,
             [
                 {"tool": "fg", "radius": 5, "points": [[10, 10]]},
                 {"tool": "bg", "radius": 5, "points": [[10, 10]]},
@@ -63,9 +69,7 @@ class TestStrokeSet:
         assert strokes.rasterize()[10, 10] == -1
 
     def test_polyline_is_filled_between_points(self):
-        strokes = StrokeSet.from_payload(
-            40, 40, [{"tool": "fg", "radius": 2, "points": [[5, 20], [35, 20]]}]
-        )
+        strokes = StrokeSet.from_payload(40, 40, [{"tool": "fg", "radius": 2, "points": [[5, 20], [35, 20]]}])
         constraints = strokes.rasterize()
         assert constraints[20, 20] == 1
 

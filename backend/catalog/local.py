@@ -5,14 +5,22 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
 
 LIST_FIELDS = (
-    "id", "name", "brand", "session_id", "storage_path",
-    "width", "height", "alpha_coverage", "recon_error", "created_at",
+    "id",
+    "name",
+    "brand",
+    "session_id",
+    "storage_path",
+    "width",
+    "height",
+    "alpha_coverage",
+    "recon_error",
+    "created_at",
 )
 
 
@@ -61,7 +69,7 @@ class LocalAssetRepository:
         row = {
             **record,
             "id": str(uuid.uuid4()),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
         rows.append(row)
         self._store(rows)
@@ -74,9 +82,7 @@ class LocalAssetRepository:
     def get(self, asset_id: str) -> dict[str, Any] | None:
         return next((r for r in self._load() if r["id"] == asset_id), None)
 
-    def similar(
-        self, embedding: list[float], limit: int, exclude_id: str | None
-    ) -> list[dict[str, Any]]:
+    def similar(self, embedding: list[float], limit: int, exclude_id: str | None) -> list[dict[str, Any]]:
         query = np.asarray(embedding, np.float32)
         scored = []
         for row in self._load():

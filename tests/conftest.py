@@ -39,9 +39,7 @@ def session_id():
     np.save(os.path.join(sdir, "probability.npy"), prob)
     np.save(os.path.join(sdir, "landmarks.npy"), rng.uniform(0, 48, size=(478, 2)))
     with open(os.path.join(sdir, "meta.json"), "w") as f:
-        json.dump(
-            {"roi": [0, 0, 48, 48], "scale": 1.0, "has_bare": False, "width": 48, "height": 48}, f
-        )
+        json.dump({"roi": [0, 0, 48, 48], "scale": 1.0, "has_bare": False, "width": 48, "height": 48}, f)
     yield sid
     shutil.rmtree(sdir, ignore_errors=True)
 

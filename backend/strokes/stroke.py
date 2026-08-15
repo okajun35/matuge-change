@@ -6,9 +6,10 @@ turns the manual corrections into reusable training data.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Iterator
+from typing import Any
 
 import cv2
 import numpy as np
@@ -61,8 +62,9 @@ class Stroke:
         return {
             "tool": self.tool.label,
             "radius": self.radius,
-            "points": [[int(x) if x.is_integer() else x, int(y) if y.is_integer() else y]
-                       for x, y in self.points],
+            "points": [
+                [int(x) if x.is_integer() else x, int(y) if y.is_integer() else y] for x, y in self.points
+            ],
         }
 
     def draw(self, canvas: np.ndarray) -> None:

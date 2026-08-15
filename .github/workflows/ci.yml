@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: 0.9.6
+          args: check
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: 0.9.6
+          args: format --check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # MediaPipe's native library links against EGL/GL even for CPU-only tasks.
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libgles2 libglib2.0-0
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements*.txt') }}
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Download face landmarker model
+        run: |
+          curl -sSfL -o models/face_landmarker.task --create-dirs \
+            https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+
+      - name: Run tests
+        run: python -m pytest

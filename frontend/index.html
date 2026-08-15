@@ -26,10 +26,21 @@
   #assetList { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
   .asset { background: #2a2a33; border-radius: 6px; padding: 6px; width: 132px; font-size: 12px; }
   .asset img { width: 120px; height: 60px; object-fit: contain; display: block; }
+  #tabs { display: flex; gap: 4px; padding: 8px 16px 0; background: #2a2a33; }
+  #tabs button { background: #3a3a45; border-radius: 8px 8px 0 0; }
+  #tabs button.tab-active { background: #4a6cf7; }
+  #videoControls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: #26262e; }
+  #videoStage { padding: 12px 16px; }
+  #videoStage img, #videoStage video { max-width: 96vw; max-height: 70vh; display: block; margin-top: 8px; }
 </style>
 </head>
 <body>
 <header><h1>matuge-change PoC — まつ毛 Alpha 抽出（商品＋自まつ毛）</h1></header>
+
+<div id="tabs">
+  <button id="tabStill" class="tab-active">静止画モード</button>
+  <button id="tabVideo">動画モード</button>
+</div>
 
 <div id="controls">
   <label>装着画像: <input type="file" id="fileWith" accept="image/*"></label>
@@ -79,13 +90,99 @@
   <canvas id="paintCanvas"></canvas>
 </div>
 
+<div id="videoMode" style="display:none">
+  <div id="videoControls">
+    <label>動画: <input type="file" id="fileVideo" accept="video/*"></label>
+    <button id="btnVideoUpload">解析開始（ベストフレーム選択）</button>
+    <a id="btnBestFrame" download="best_frame.png" style="display:none"><button class="secondary">ベストフレームを保存</button></a>
+    <span style="border-left:1px solid #555;height:24px"></span>
+    <label>AI加工済み画像: <input type="file" id="fileVideoEdited" accept="image/*"></label>
+    <label>目元領域の広さ <input type="range" id="expandRange" min="15" max="90" value="45"></label>
+    <button id="btnCompose">動画合成</button>
+    <a id="btnVideoDownload" download="output.mp4" style="display:none"><button class="secondary">合成動画を保存</button></a>
+  </div>
+  <div id="videoStatus" style="padding:6px 16px;font-size:13px;color:#9fd;min-height:20px">動画をアップロードしてください。ベストフレームを保存→外部でAI加工（目元は変えない指示推奨）→加工済み画像を選んで「動画合成」。</div>
+  <div id="videoStage">
+    <img id="bestFrameImg" style="display:none" alt="best frame">
+    <video id="outputVideo" controls loop style="display:none"></video>
+  </div>
+</div>
+
 <script>
 const state = {
   session: null, w: 0, h: 0, brush: null, painting: false, layer: 'roi_a',
-  strokes: [], current: null, supabase: null, channel: null,
+  strokes: [], current: null, supabase: null, channel: null, videoSession: null,
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
+
+function setMode(mode) {
+  const still = mode === 'still';
+  document.getElementById('tabStill').classList.toggle('tab-active', still);
+  document.getElementById('tabVideo').classList.toggle('tab-active', !still);
+  for (const id of ['controls', 'catalog', 'assetList', 'status', 'stage'])
+    document.getElementById(id).style.display = still ? '' : 'none';
+  document.getElementById('videoMode').style.display = still ? 'none' : '';
+}
+document.getElementById('tabStill').onclick = () => setMode('still');
+document.getElementById('tabVideo').onclick = () => setMode('video');
+
+const vstatus = (msg) => document.getElementById('videoStatus').textContent = msg;
+
+document.getElementById('btnVideoUpload').onclick = async () => {
+  const fv = document.getElementById('fileVideo').files[0];
+  if (!fv) { vstatus('動画を選択してください'); return; }
+  const fd = new FormData();
+  fd.append('video', fv);
+  vstatus('解析中…（フレーム分解・全フレームの顔検出・ベストフレーム選択。動画長に応じて時間がかかります）');
+  document.getElementById('btnVideoUpload').disabled = true;
+  try {
+    const res = await fetch('/api/video/session', { method: 'POST', body: fd });
+    if (!res.ok) { vstatus('エラー: ' + (await res.text())); return; }
+    const data = await res.json();
+    state.videoSession = data.session_id;
+    const img = document.getElementById('bestFrameImg');
+    img.src = `/api/image/${data.session_id}/best_frame?t=${Date.now()}`;
+    img.style.display = '';
+    document.getElementById('outputVideo').style.display = 'none';
+    document.getElementById('btnVideoDownload').style.display = 'none';
+    const bf = document.getElementById('btnBestFrame');
+    bf.href = `/api/image/${data.session_id}/best_frame`;
+    bf.style.display = '';
+    vstatus(`解析完了: ${data.frame_count}フレーム / ${data.fps.toFixed(1)}fps、ベストフレーム #${data.best_frame_index}。この画像を保存してAI加工し、加工済み画像を選んで「動画合成」を押してください。`);
+  } finally {
+    document.getElementById('btnVideoUpload').disabled = false;
+  }
+};
+
+document.getElementById('btnCompose').onclick = async () => {
+  if (!state.videoSession) { vstatus('先に動画を解析してください'); return; }
+  const fe = document.getElementById('fileVideoEdited').files[0];
+  if (!fe) { vstatus('AI加工済み画像を選択してください'); return; }
+  const fd = new FormData();
+  fd.append('session_id', state.videoSession);
+  fd.append('edited_image', fe);
+  fd.append('expand', (+document.getElementById('expandRange').value / 100).toString());
+  vstatus('合成中…（全フレームへ目元領域を合成して動画を再生成しています）');
+  document.getElementById('btnCompose').disabled = true;
+  try {
+    const res = await fetch('/api/video/compose', { method: 'POST', body: fd });
+    if (!res.ok) { vstatus('エラー: ' + (await res.text())); return; }
+    const data = await res.json();
+    const url = `/api/video/${state.videoSession}/output?t=${Date.now()}`;
+    const vid = document.getElementById('outputVideo');
+    vid.src = url;
+    vid.style.display = '';
+    document.getElementById('bestFrameImg').style.display = 'none';
+    const dl = document.getElementById('btnVideoDownload');
+    dl.href = `/api/video/${state.videoSession}/output`;
+    dl.style.display = '';
+    vstatus(`合成完了（${data.frame_count}フレーム）。目元に違和感がある場合は「目元領域の広さ」を調整して再合成してください。`);
+  } finally {
+    document.getElementById('btnCompose').disabled = false;
+  }
+};
+
 const baseCanvas = document.getElementById('baseCanvas');
 const paintCanvas = document.getElementById('paintCanvas');
 const stage = document.getElementById('stage');

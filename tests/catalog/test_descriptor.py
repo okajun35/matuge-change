@@ -10,7 +10,7 @@ def lash_alpha(width: int, height: int, thickness: int = 3, curl: float = 0.0) -
     alpha = np.zeros((height, width), np.float32)
     xs = np.arange(width)
     ys = (height * 0.6 - curl * height * 0.3 * np.sin(np.pi * xs / max(1, width - 1))).astype(int)
-    for x, y in zip(xs, ys):
+    for x, y in zip(xs, ys, strict=False):
         cv2.circle(alpha, (int(x), int(y)), thickness, 1.0, -1)
     return cv2.GaussianBlur(alpha, (0, 0), 1.2)
 
@@ -39,10 +39,13 @@ class TestLashDescriptor:
         base = lash_alpha(80, 40)
         shifted = np.zeros((60, 120), np.float32)
         shifted[10:50, 20:100] = base
-        assert cosine(
-            LashDescriptor.from_alpha(base).values,
-            LashDescriptor.from_alpha(shifted).values,
-        ) > 0.95
+        assert (
+            cosine(
+                LashDescriptor.from_alpha(base).values,
+                LashDescriptor.from_alpha(shifted).values,
+            )
+            > 0.95
+        )
 
     def test_different_shapes_are_less_similar_than_same_shape(self):
         straight = LashDescriptor.from_alpha(lash_alpha(80, 40, curl=0.0))

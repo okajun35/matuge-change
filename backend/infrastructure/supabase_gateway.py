@@ -6,14 +6,15 @@ app falls back to the local adapters and keeps running fully offline.
 
 from __future__ import annotations
 
+import contextlib
 import os
+from datetime import UTC
 from functools import lru_cache
 from typing import Any
 
 BUCKET = "product-assets"
 ASSET_LIST_COLUMNS = (
-    "id,name,brand,session_id,storage_path,width,height,"
-    "alpha_coverage,recon_error,created_at"
+    "id,name,brand,session_id,storage_path,width,height,alpha_coverage,recon_error,created_at"
 )
 
 
@@ -74,14 +75,10 @@ class SupabaseAssetRepository:
         )
 
     def get(self, asset_id: str) -> dict[str, Any] | None:
-        rows = (
-            client().table("product_assets").select("*").eq("id", asset_id).limit(1).execute().data
-        )
+        rows = client().table("product_assets").select("*").eq("id", asset_id).limit(1).execute().data
         return rows[0] if rows else None
 
-    def similar(
-        self, embedding: list[float], limit: int, exclude_id: str | None
-    ) -> list[dict[str, Any]]:
+    def similar(self, embedding: list[float], limit: int, exclude_id: str | None) -> list[dict[str, Any]]:
         return (
             client()
             .rpc(
@@ -99,7 +96,7 @@ class SupabaseAssetRepository:
 
 class SupabaseStrokeRepository:
     def save(self, session_id: str, width: int, height: int, payload: list[dict[str, Any]]) -> None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         client().table("session_strokes").upsert(
             {
@@ -107,19 +104,13 @@ class SupabaseStrokeRepository:
                 "width": width,
                 "height": height,
                 "strokes": payload,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
         ).execute()
 
     def load(self, session_id: str) -> dict[str, Any] | None:
         rows = (
-            client()
-            .table("session_strokes")
-            .select("*")
-            .eq("session_id", session_id)
-            .limit(1)
-            .execute()
-            .data
+            client().table("session_strokes").select("*").eq("session_id", session_id).limit(1).execute().data
         )
         return rows[0] if rows else None
 
@@ -130,7 +121,6 @@ class SupabaseJobMirror:
     def upsert(self, job) -> None:
         row = job.to_dict()
         row.pop("created_at", None)
-        try:
+        # progress mirroring must never break the matting run
+        with contextlib.suppress(Exception):
             client().table("matte_jobs").upsert(row).execute()
-        except Exception:  # progress mirroring must never break the matting run
-            pass

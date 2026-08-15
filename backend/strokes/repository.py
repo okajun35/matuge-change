@@ -8,8 +8,7 @@ from typing import Any, Protocol
 
 
 class StrokeRepository(Protocol):
-    def save(self, session_id: str, width: int, height: int, payload: list[dict[str, Any]]) -> None:
-        ...
+    def save(self, session_id: str, width: int, height: int, payload: list[dict[str, Any]]) -> None: ...
 
     def load(self, session_id: str) -> dict[str, Any] | None: ...
 

@@ -41,9 +41,7 @@ class TestBrowseCatalog:
 
 class TestSimilarity:
     def test_similar_returns_other_assets_scored(self, client, matted_session):
-        first = client.post(
-            "/api/assets", data={"session_id": matted_session, "name": "A"}
-        ).json()["id"]
+        first = client.post("/api/assets", data={"session_id": matted_session, "name": "A"}).json()["id"]
         client.post("/api/assets", data={"session_id": matted_session, "name": "B"})
 
         res = client.get(f"/api/assets/{first}/similar", params={"limit": 3})

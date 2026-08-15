@@ -5,7 +5,13 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from backend.api import catalog_routes, config_routes, sessions_routes, stroke_routes
+from backend.api import (
+    catalog_routes,
+    config_routes,
+    sessions_routes,
+    stroke_routes,
+    video_routes,
+)
 from backend.api.container import DATA_DIR, FRONTEND_DIR, container
 
 app = FastAPI(title="matuge-change PoC")
@@ -13,6 +19,7 @@ app.include_router(config_routes.router)
 app.include_router(sessions_routes.router)
 app.include_router(catalog_routes.router)
 app.include_router(stroke_routes.router)
+app.include_router(video_routes.router)
 
 container()  # fail fast on misconfiguration and create the data directory
 

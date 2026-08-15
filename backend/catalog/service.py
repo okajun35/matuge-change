@@ -25,9 +25,7 @@ class ProductAssetRepository(Protocol):
 
     def get(self, asset_id: str) -> dict[str, Any] | None: ...
 
-    def similar(
-        self, embedding: list[float], limit: int, exclude_id: str | None
-    ) -> list[dict[str, Any]]: ...
+    def similar(self, embedding: list[float], limit: int, exclude_id: str | None) -> list[dict[str, Any]]: ...
 
 
 class CatalogService:
