@@ -50,9 +50,12 @@ async function refreshAssets() {
     const card = document.createElement('div');
     card.className = 'asset checker';
     card.innerHTML = `<img src="/api/assets/${a.id}/image" alt="${a.name}">` +
-      `<div>${a.name}</div><div style="color:#9ab">${a.brand || ''}</div>`;
+      `<div>${a.name}</div><div style="color:#9ab">${a.brand || ''}</div>` +
+      `<div class="asset-actions">` +
+      `<a href="/api/assets/${a.id}/image" download="${a.name}.png" title="アルファ付きRGBA PNG">RGBA</a>` +
+      `<a href="/api/assets/${a.id}/mask" download="${a.name}-mask.png" title="アルファのみ（白黒マスク）">マスク</a></div>`;
     card.title = `alpha ${(a.alpha_coverage ?? 0).toFixed(3)} / err ${(a.recon_error ?? 0).toFixed(1)}`;
-    card.onclick = () => showSimilar(a.id, a.name);
+    card.onclick = (e) => { if (e.target.tagName !== 'A') showSimilar(a.id, a.name); };
     list.appendChild(card);
   }
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));

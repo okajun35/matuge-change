@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 import pytest
 
@@ -82,6 +83,12 @@ class TestLoading:
         asset = service.register(draft())
         loaded = service.load_rgba(asset.id)
         assert loaded.shape == (20, 40, 4)
+
+    def test_load_mask_png_is_the_alpha_channel(self, service):
+        asset = service.register(draft())
+        mask = cv2.imdecode(np.frombuffer(service.load_mask_png(asset.id), np.uint8), cv2.IMREAD_UNCHANGED)
+        assert mask.ndim == 2
+        assert np.array_equal(mask, product_rgba()[..., 3])
 
     def test_list_returns_a_page_with_the_total(self, service):
         service.register(draft(name="A"))

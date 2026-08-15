@@ -79,6 +79,10 @@ class CatalogService:
     def load_png(self, asset_id: str) -> bytes:
         return self.storage.download(self._require(asset_id)["storage_path"])
 
+    def load_mask_png(self, asset_id: str) -> bytes:
+        """Alpha channel of the stored product PNG, as a grayscale PNG."""
+        return cv2.imencode(".png", self.load_rgba(asset_id)[..., 3])[1].tobytes()
+
     @staticmethod
     def decode_png(data: bytes) -> np.ndarray:
         return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_UNCHANGED)
