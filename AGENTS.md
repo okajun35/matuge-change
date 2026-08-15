@@ -2,6 +2,8 @@
 
 このリポジトリで作業するAIエージェント・開発者が毎回最初に読むべきルール。
 
+**セッションを引き継いだ場合はまず `docs/handover.md` を読む** — これまでに採用/却下した方式とその理由、既知の落とし穴、未検証事項がまとまっている。
+
 ## 開発方針: TDD（テスト駆動開発）
 
 新機能・バグ修正は必ずTDDで進める。
@@ -48,9 +50,19 @@ pre-commit run --all-files
 - 商品（まつ毛）ピクセルはLevel 3（Pixel Preserve）: AIに描き直させず元画像から抽出・保持・再合成する
 - 生成AIは Model Editing のみに使い、Adapter構造で特定サービスに依存しない（docs/ai-editing-api.md）
 - 動画は「ベストフレーム1枚をAI加工 → 元動画の目元領域をランドマーク追従で差し替え合成」方式（docs/video-approach.md）
+- 却下済み方式を再提案しない: 抽出レイヤーの warp 追従（商品ピクセルを変形するためNG）／毎フレーム独立のAlpha抽出（ちらつく）。経緯は docs/handover.md §3
+
+## フロントエンドの不変条件（静止画モード）
+
+- レイヤーは3系統。`roi_*` などサーバ側レイヤー（目元ROI解像度・ブラシ対象）、`source_*`（アップロード済み元画像・表示専用）、`local_*`（解析前のローカルプレビュー・表示専用）
+- 表示専用レイヤーでは `paintCanvas` のサイズを変えない（ブラシ座標＝制約PNGの座標系が壊れる）
+- ズームは `#canvasWrap` の `transform: scale()`。ブラシ座標は `state.zoom` で割って画像座標へ戻す
+- レイヤー一覧の再構築でレイヤーを落とさない（再開時の `roi_b`、Matting再実行時の `composite_on_edited`）
 
 ## その他ルール
 
 - PRを作る前に `pytest` / `ruff check` / `pre-commit run --all-files` を全て通す
 - FastAPIの `File(...)/Form(...)` 引数デフォルトは許容（ruff B008 はignore済み）
 - 既存の静止画モードの機能は壊さない・削除しない
+- uvicorn は自動リロードしないので、ルート追加・pull後はサーバを再起動する（しないと404を誤診する）
+- `.venv` に ruff/pre-commit が無い環境では `uvx ruff check` / `uvx pre-commit run --all-files` を使う
