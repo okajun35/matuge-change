@@ -10,3 +10,17 @@ class TestGetSession:
 
     def test_unknown_session_returns_404(self, client):
         assert client.get("/api/sessions/nope").status_code == 404
+
+
+class TestRunHistoryApi:
+    def test_empty_before_matting(self, client, session_id):
+        assert client.get(f"/api/sessions/{session_id}/runs").json()["runs"] == []
+
+    def test_run_recorded_after_matting(self, client, matted_session):
+        runs = client.get(f"/api/sessions/{matted_session}/runs").json()["runs"]
+        assert len(runs) == 1
+        assert runs[0]["params"]["fg_thresh"] == 0.70
+        assert isinstance(runs[0]["reconstruction_error"], float)
+
+    def test_unknown_session_returns_404(self, client):
+        assert client.get("/api/sessions/nope/runs").status_code == 404
