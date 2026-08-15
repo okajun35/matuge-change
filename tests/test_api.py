@@ -55,6 +55,12 @@ class TestSession:
         res = client.post("/api/session", files={"image_with": ("a.png", b"not an image")})
         assert res.status_code == 400
 
+    def test_empty_file_returns_400_with_reason(self):
+        # クラウド同期途中のファイル等で 0 バイトが送られてくることがある
+        res = client.post("/api/session", files={"image_with": ("a.png", b"")})
+        assert res.status_code == 400
+        assert "a.png" in res.json()["detail"]
+
 
 class TestMatte:
     def test_unknown_session_returns_404(self):

@@ -23,9 +23,9 @@
 </nav>
 
 <div class="bar" id="controls">
-  <label>装着画像: <input type="file" id="fileWith" accept="image/*"></label>
+  <label>① 装着画像: <input type="file" id="fileWith" accept="image/*"></label>
   <label>未装着画像(任意): <input type="file" id="fileWithout" accept="image/*"></label>
-  <button id="btnUpload">解析開始</button>
+  <button id="btnUpload">② 解析開始</button>
   <label>セッションID <input type="text" id="sessionId" size="12" placeholder="作業を再開"></label>
   <button id="btnResume" class="secondary">再開</button>
   <span class="sep"></span>
@@ -47,7 +47,7 @@
   <span class="sep"></span>
   <label>FG閾値 <input type="range" id="fgThresh" min="30" max="95" value="70"></label>
   <label>BG閾値 <input type="range" id="bgThresh" min="2" max="50" value="18"></label>
-  <button id="btnMatte">Matting実行</button>
+  <button id="btnMatte">③ Matting実行</button>
   <span class="sep"></span>
   <label>編集済み画像: <input type="file" id="fileEdited" accept="image/*"></label>
   <button id="btnRecompose">再合成</button>
@@ -63,7 +63,7 @@
   <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
 </div>
 
-<div class="status" id="status">画像をアップロードしてください。</div>
+<div class="status" id="status">① 装着画像を選ぶ →②「解析開始」→（必要ならブラシで補正）→③「Matting実行」。</div>
 
 <div id="stage">
   <canvas id="baseCanvas"></canvas>
@@ -83,6 +83,18 @@ const stage = document.getElementById('stage');
 const bctx = baseCanvas.getContext('2d');
 const pctx = paintCanvas.getContext('2d');
 const status = (msg) => document.getElementById('status').textContent = msg;
+
+// fetch は通信断・ファイル読み取り失敗で reject するため、必ず捕まえて理由を表示する
+async function postForm(url, fd) {
+  let res;
+  try {
+    res = await fetch(url, { method: 'POST', body: fd });
+  } catch (e) {
+    throw new Error(`送信に失敗しました（選択したファイルが移動・削除された、またはサーバーに接続できません）: ${e.message}`);
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
 
 function setLayerOptions(layers) {
   const names = {
@@ -178,9 +190,13 @@ document.getElementById('btnUpload').onclick = async () => {
   const fo = document.getElementById('fileWithout').files[0];
   if (fo) fd.append('image_without', fo);
   status('解析中…（顔検出・位置合わせ・差分計算）');
-  const res = await fetch('/api/session', { method: 'POST', body: fd });
-  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
-  const data = await res.json();
+  let data;
+  try {
+    data = await postForm('/api/session', fd);
+  } catch (e) {
+    status('エラー: ' + e.message);
+    return;
+  }
   state.session = data.session_id;
   state.w = data.width; state.h = data.height;
   state.strokes = [];
@@ -287,15 +303,19 @@ window.addEventListener('pointerup', () => {
 });
 
 document.getElementById('btnRecompose').onclick = async () => {
-  if (!state.session) { status('先に画像をアップロードしてください'); return; }
+  if (!state.session) { status('まだセッションがありません。装着画像を選んで「解析開始」を押してください'); return; }
   const fe = document.getElementById('fileEdited').files[0];
   if (!fe) { status('編集済み画像を選択してください'); return; }
   status('再合成中…（顔検出・位置合わせ・Alpha合成）');
   const fd = new FormData();
   fd.append('session_id', state.session);
   fd.append('edited_image', fe);
-  const res = await fetch('/api/recompose', { method: 'POST', body: fd });
-  if (!res.ok) { status('エラー: ' + (await res.text())); return; }
+  try {
+    await postForm('/api/recompose', fd);
+  } catch (e) {
+    status('エラー: ' + e.message);
+    return;
+  }
   const sel = document.getElementById('layerSelect');
   const layers = [...sel.options].map(o => o.value);
   if (!layers.includes('composite_on_edited')) layers.push('composite_on_edited');
@@ -342,7 +362,7 @@ async function followWithPolling(jobId) {
 }
 
 document.getElementById('btnMatte').onclick = async () => {
-  if (!state.session) { status('先に画像をアップロードしてください'); return; }
+  if (!state.session) { status('まだセッションがありません。装着画像を選んで「解析開始」を押してください'); return; }
   status('Matting をキューに投入中…');
   setProgress(0);
   document.getElementById('btnMatte').disabled = true;
@@ -353,9 +373,13 @@ document.getElementById('btnMatte').onclick = async () => {
   const blank = !paintBackup || paintBackup.data.every((v, i) => (i % 4 !== 3) || v === 0);
   if (!blank) fd.append('constraints_png', paintCanvas.toDataURL('image/png'));
   try {
-    const res = await fetch('/api/matte/jobs', { method: 'POST', body: fd });
-    if (!res.ok) { status('エラー: ' + (await res.text())); return; }
-    const { job_id: jobId } = await res.json();
+    let jobId;
+    try {
+      ({ job_id: jobId } = await postForm('/api/matte/jobs', fd));
+    } catch (e) {
+      status('エラー: ' + e.message);
+      return;
+    }
     const job = state.supabase ? await followWithRealtime(jobId) : await followWithPolling(jobId);
     if (job.status === 'failed') { status('Matting 失敗: ' + job.error); return; }
     const base = ['roi_a'];
