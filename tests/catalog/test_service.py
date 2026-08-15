@@ -83,7 +83,15 @@ class TestLoading:
         loaded = service.load_rgba(asset.id)
         assert loaded.shape == (20, 40, 4)
 
-    def test_list_returns_registered_assets(self, service):
+    def test_list_returns_a_page_with_the_total(self, service):
         service.register(draft(name="A"))
         service.register(draft(name="B"))
-        assert [a["name"] for a in service.list_assets()] == ["A", "B"]
+        page = service.list_assets(limit=1)
+        assert [a["name"] for a in page["items"]] == ["A"]
+        assert page["total"] == 2
+
+    def test_list_forwards_offset_and_query(self, service):
+        service.register(draft(name="A"))
+        page = service.list_assets(limit=5, offset=3, query="vol")
+        assert service.repository.page_calls[-1] == {"limit": 5, "offset": 3, "query": "vol"}
+        assert page["items"] == []

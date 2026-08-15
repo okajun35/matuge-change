@@ -63,16 +63,13 @@ class SupabaseAssetRepository:
     def insert(self, record: dict[str, Any]) -> dict[str, Any]:
         return client().table("product_assets").insert(record).execute().data[0]
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
-        return (
-            client()
-            .table("product_assets")
-            .select(ASSET_LIST_COLUMNS)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-            .data
-        )
+    def page(self, limit: int = 12, offset: int = 0, query: str = "") -> dict[str, Any]:
+        request = client().table("product_assets").select(ASSET_LIST_COLUMNS, count="exact")
+        if query:
+            escaped = query.replace("%", r"\%").replace(",", "")
+            request = request.or_(f"name.ilike.%{escaped}%,brand.ilike.%{escaped}%")
+        response = request.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        return {"items": response.data, "total": response.count or 0}
 
     def get(self, asset_id: str) -> dict[str, Any] | None:
         rows = client().table("product_assets").select("*").eq("id", asset_id).limit(1).execute().data

@@ -75,9 +75,21 @@ class LocalAssetRepository:
         self._store(rows)
         return row
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]:
-        rows = sorted(self._load(), key=lambda r: r["created_at"])
-        return [{k: r.get(k) for k in LIST_FIELDS} for r in rows[:limit]]
+    def page(self, limit: int = 12, offset: int = 0, query: str = "") -> dict[str, Any]:
+        rows = list(enumerate(self._load()))
+        if query:
+            needle = query.casefold()
+            rows = [
+                pair
+                for pair in rows
+                if needle in f"{pair[1].get('name') or ''} {pair[1].get('brand') or ''}".casefold()
+            ]
+        rows.sort(key=lambda pair: (pair[1]["created_at"], pair[0]), reverse=True)
+        window = rows[offset : offset + limit]
+        return {
+            "items": [{k: row.get(k) for k in LIST_FIELDS} for _, row in window],
+            "total": len(rows),
+        }
 
     def get(self, asset_id: str) -> dict[str, Any] | None:
         return next((r for r in self._load() if r["id"] == asset_id), None)

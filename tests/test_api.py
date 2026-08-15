@@ -155,6 +155,11 @@ class TestPages:
         assert "/extract.html" in res.text
         assert "/video.html" in res.text
 
+    def test_catalog_page_has_search_and_pagination(self):
+        res = client.get("/")
+        for marker in ("assetQuery", "btnPrevPage", "btnNextPage", "offset"):
+            assert marker in res.text
+
     def test_extract_page_has_static_mode_controls(self):
         res = client.get("/extract.html")
         assert res.status_code == 200

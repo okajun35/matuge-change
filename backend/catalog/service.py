@@ -21,7 +21,7 @@ class AssetStorage(Protocol):
 class ProductAssetRepository(Protocol):
     def insert(self, record: dict[str, Any]) -> dict[str, Any]: ...
 
-    def list(self, limit: int = 50) -> list[dict[str, Any]]: ...
+    def page(self, limit: int = 12, offset: int = 0, query: str = "") -> dict[str, Any]: ...
 
     def get(self, asset_id: str) -> dict[str, Any] | None: ...
 
@@ -58,8 +58,9 @@ class CatalogService:
         )
         return ProductAsset.from_row(row)
 
-    def list_assets(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self.repository.list(limit)
+    def list_assets(self, limit: int = 12, offset: int = 0, query: str = "") -> dict[str, Any]:
+        """One page of the catalog: `{"items": [...], "total": n}`."""
+        return self.repository.page(limit=limit, offset=offset, query=query)
 
     def get_asset(self, asset_id: str) -> dict[str, Any]:
         return self._require(asset_id)

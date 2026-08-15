@@ -15,6 +15,7 @@
 </nav>
 
 <div class="bar">
+  <label>検索 <input type="text" id="assetQuery" placeholder="商品名 / ブランド"></label>
   <button id="btnRefreshAssets" class="secondary">カタログ更新</button>
   <a href="/extract.html"><button>商品を抽出して登録する</button></a>
   <span id="catalogInfo" style="font-size:13px;color:#9fd"></span>
@@ -22,14 +23,28 @@
 
 <div class="status" id="status">カードをクリックすると形状の近い商品を表示します。</div>
 <div id="assetList"></div>
+<div id="assetPager">
+  <button id="btnPrevPage" class="secondary">‹ 前へ</button>
+  <span id="pageInfo"></span>
+  <button id="btnNextPage" class="secondary">次へ ›</button>
+</div>
 
 <script>
 const catalogInfo = (msg) => document.getElementById('catalogInfo').textContent = msg;
 const status = (msg) => document.getElementById('status').textContent = msg;
 
+const PAGE_SIZE = 12;
+const catalogPage = { offset: 0, query: '' };
+
 async function refreshAssets() {
   const list = document.getElementById('assetList');
-  const { assets } = await (await fetch('/api/assets')).json();
+  const params = new URLSearchParams({ limit: PAGE_SIZE, offset: catalogPage.offset });
+  if (catalogPage.query) params.set('q', catalogPage.query);
+  const { assets, total, offset } = await (await fetch(`/api/assets?${params}`)).json();
+  if (offset > 0 && assets.length === 0) {   // 末尾ページが空になったら戻す
+    catalogPage.offset = Math.max(0, offset - PAGE_SIZE);
+    return refreshAssets();
+  }
   list.innerHTML = '';
   for (const a of assets) {
     const card = document.createElement('div');
@@ -40,8 +55,13 @@ async function refreshAssets() {
     card.onclick = () => showSimilar(a.id, a.name);
     list.appendChild(card);
   }
-  catalogInfo(`${assets.length} 件`);
-  if (!assets.length) status('登録済みの商品はまだありません。「静止画モード」でまつ毛を抽出して登録してください。');
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const current = Math.floor(offset / PAGE_SIZE) + 1;
+  document.getElementById('pageInfo').textContent = `${current} / ${pages} ページ（全 ${total} 件）`;
+  document.getElementById('btnPrevPage').disabled = offset === 0;
+  document.getElementById('btnNextPage').disabled = offset + PAGE_SIZE >= total;
+  catalogInfo(`${total} 件`);
+  if (!total) status('登録済みの商品はまだありません。「静止画モード」でまつ毛を抽出して登録してください。');
 }
 
 async function showSimilar(assetId, name) {
@@ -51,7 +71,24 @@ async function showSimilar(assetId, name) {
     matches.map(m => `${m.name} (${(m.similarity * 100).toFixed(1)}%)`).join(' / '));
 }
 
-document.getElementById('btnRefreshAssets').onclick = refreshAssets;
+document.getElementById('btnRefreshAssets').onclick = () => { catalogPage.offset = 0; refreshAssets(); };
+document.getElementById('btnPrevPage').onclick = () => {
+  catalogPage.offset = Math.max(0, catalogPage.offset - PAGE_SIZE);
+  refreshAssets();
+};
+document.getElementById('btnNextPage').onclick = () => {
+  catalogPage.offset += PAGE_SIZE;
+  refreshAssets();
+};
+let queryTimer = null;
+document.getElementById('assetQuery').oninput = (e) => {
+  clearTimeout(queryTimer);
+  queryTimer = setTimeout(() => {
+    catalogPage.query = e.target.value.trim();
+    catalogPage.offset = 0;
+    refreshAssets();
+  }, 250);
+};
 refreshAssets();
 </script>
 </body>
