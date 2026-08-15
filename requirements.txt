@@ -1,9 +1,9 @@
-fastapi
-uvicorn
-opencv-python-headless
-numpy
-pillow
-mediapipe
-pymatting
-python-multipart
+fastapi==0.141.1
+uvicorn==0.52.3
+opencv-python-headless==5.0.0.93
+numpy==2.4.6
+pillow==12.3.0
+mediapipe==1.0.1
+pymatting==1.1.15
+python-multipart==0.0.32
 supabase==2.31.0
