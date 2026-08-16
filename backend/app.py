@@ -13,6 +13,9 @@ from backend.api import (
     video_routes,
 )
 from backend.api.container import DATA_DIR, FRONTEND_DIR, container
+from backend.observability import log_matte_settings
+
+log_matte_settings()  # which solve mode this deployment runs, before anything serves
 
 app = FastAPI(title="matuge-change PoC")
 app.include_router(config_routes.router)

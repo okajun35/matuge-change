@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from backend.api.container import container
 from backend.api.errors import read_upload, to_http
+from backend.jobs.gate import matte_slot
 from backend.strokes.constraints import decode_constraints_png
 
 router = APIRouter(prefix="/api")
@@ -155,10 +156,13 @@ async def run_matte(
     unknown_band_px: int = Form(6),
 ):
     app = container()
+    # the same gate the queued jobs go through: it bounds concurrent mattings across both
+    # paths and releases the memory afterwards, on success and on failure alike
     try:
-        app.sessions.store.require(session_id)
-        constraints = _constraints(session_id, constraints_png, use_saved_strokes)
-        return app.sessions.run_matte(session_id, constraints, fg_thresh, bg_thresh, unknown_band_px)
+        with matte_slot():
+            app.sessions.store.require(session_id)
+            constraints = _constraints(session_id, constraints_png, use_saved_strokes)
+            return app.sessions.run_matte(session_id, constraints, fg_thresh, bg_thresh, unknown_band_px)
     except Exception as exc:
         raise to_http(exc) from exc
 

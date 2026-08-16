@@ -65,7 +65,7 @@ class TestRecomposeWithoutLandmarks:
         monkeypatch.setattr(
             service_module,
             "run_matting",
-            lambda roi, trimap: (alpha, np.zeros((*alpha.shape, 3), np.float64)),
+            lambda roi, trimap, **kwargs: (alpha, np.zeros((*alpha.shape, 3), np.float64)),
         )
 
         profile_service.run_matte(sid, None)

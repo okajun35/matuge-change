@@ -28,6 +28,7 @@ from backend.lash_extraction import (
     recompose_onto,
     reconstruction_error,
     run_matting,
+    solve_settings,
 )
 from backend.sessions.errors import FaceNotDetected, MatteNotReady
 from backend.sessions.store import SessionStore
@@ -135,7 +136,8 @@ class SessionService:
         report(20, "trimap")
         trimap = build_trimap(prob, constraints, fg_thresh, bg_thresh, unknown_band_px)
         report(45, "alpha")
-        alpha, fg = run_matting(roi_a, trimap)
+        mode, budget = solve_settings()
+        alpha, fg = run_matting(roi_a, trimap, mode=mode, max_solve_pixels=budget)
         report(85, "foreground")
 
         rgba = np.dstack([(fg * 255).astype(np.uint8), (alpha * 255).astype(np.uint8)])
@@ -164,6 +166,8 @@ class SessionService:
                     "unknown_band_px": unknown_band_px,
                 },
                 "reconstruction_error": error,
+                "solve_mode": mode,
+                "max_solve_pixels": budget,
                 "layers": layers,
             },
         )

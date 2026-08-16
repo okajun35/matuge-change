@@ -120,6 +120,57 @@
 詳細と改善優先順位は `docs/benchmark-findings.md`、指標定義と合成データの限界は `evaluation/README.md`。
 **Benchmarkの数値を良くするために production を変えてはいけない**（計測と改善のPRを分ける）。
 
+## 6.6 512MB ホストのメモリ（full / tiled の分離）
+
+Render Starter（512MB）で Matting を2回押すと OOM → 502 になった。原因は
+closed-form solve のピーク（解く画素数に比例、約 3MB/1000px）と、再合成が画像全体の
+float64 バッファを3枚作ること。依存ライブラリの常駐だけで約 287MB ある。
+
+採用した方式（設定値は README「Matting のメモリ設定（環境変数）」）:
+
+- `MATTE_SOLVE_MODE=full`（**既定**）— ROI 全体を一度に solve。`solve_window()` も使わない。
+  通常の有効な trimap では従来実装と**ビット一致**（実測 alpha/foreground の差 0.0）
+- `MATTE_SOLVE_MODE=tiled` — 低メモリ環境向けの**近似**。solve window を
+  `MATTE_MAX_SOLVE_PIXELS` 以下のタイルに割って解く
+- 再合成は旧 float64 式のまま行ストライプ（64行）単位で処理する。全体を一度に持たないだけで
+  出力はビット一致（テストで担保）。float32 化案は旧出力と一致しないため却下
+- 同時実行数は `backend/jobs/gate.py` の**プロセス共通ゲート**（既定1）で決まる。同期
+  `POST /api/matte` も非同期ジョブも同じ `matte_slot()` を通り、その `finally` で成功・失敗
+  どちらでも `release_memory()`（`gc.collect()` + `malloc_trim(0)`）を呼ぶ。executor の幅だけを
+  1 にしても同期APIが迂回してピークが二重になる（実際にそうなっていた）
+- ラベル不足タイルを一律 alpha 0/1 にしてはいけない（矩形状の不連続を作る。full との
+  平均差 0.301・最大 0.797 を観測）。かわりに**画素上限を守ったまま**ラベルを探す:
+  ①上限内で context を広げる → ②上限内で縦長／横長の帯に変形（離れた FG/BG に届く） →
+  ③タイルを半分に割って再試行（細いタイルほど長い帯が同じ画素数で買える）→
+  ④それでも無理なら設定エラー。ラベル探索を上限より優先すると 1 solve が budget の 11 倍
+  （600x1100・budget 60,000 で 660,000px）になり、tiled が full より重くなって OOM に戻る
+
+実測ピークRSS（ユーザー提供の実写3枚、create → matte×2 → recompose、対策前は 556〜572MB）:
+
+| モード | native(1536x2048) | 1600px | 累積 |
+| --- | --- | --- | --- |
+| full（既定） | 489MB | 489MB | 2回目 +0MB |
+| tiled（60,000px） | 450MB | 450MB | 2回目 +3MB |
+
+tiled と full の差（**C層**: 合成ケースの回帰比較。実写精度ではない）:
+
+| ケース | alpha MAD | alpha 最大差 | Dice / Precision / Recall |
+| --- | --- | --- | --- |
+| 通常（FGラベル中央） | 0.0001 | 0.014 | 0.999 / 0.999 / 1.000 |
+| 広いUnknown＋離れたFG/BG | 0.073 | 0.615 | 0.855 / 0.747 / 1.000 |
+| 離れた商品領域2つ | 0.0004 | 0.064 | 0.998 / 0.995 / 1.000 |
+
+広いUnknownで差が残るのは近似の性質（画素上限を守るため context を帯に制限した分、
+上限を無視していた頃の 0.042 より広がった）。メモリに余裕があるなら `full` を使う。生成物がどちらの
+モードかは実行履歴の `solve_mode` / `max_solve_pixels` で追跡できる。
+
+デプロイ先で実際にどのモードが効いているかは stdout のログで確認する（`backend/observability.py`。
+uvicorn は root logger にハンドラを付けないので、`backend` logger に自前で stdout ハンドラを付けている）:
+起動時の `matte settings: ...` 1行、実行ごとの `matte run: ... max_solve_px=... elapsed_ms=...`、
+ゲート待ちの `matte waiting for a matting slot: ...`。`max_solve_px` が budget を超えていたら
+tiled の上限が破れている（過去のブロッカーの再発検知）。レベルは `MATTE_LOG_LEVEL`（既定 INFO）。
+設定値が不正な場合は起動を落とさず `ERROR` を1行出す（トレースバックに typo が埋もれるのを避ける）。
+
 ## 7. 未検証・今後の課題
 
 - 手動ROIモードの実写検証（横顔画像でのAlpha品質）
