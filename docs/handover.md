@@ -181,10 +181,12 @@ Matting の設定（6.6）は solve 側だけを守るので、**解析開始そ
 
 対策（出力を壊さない範囲で、ピーク **420MB**）:
 
-- `detect_landmarks()` は長辺 `DETECT_MAX_SIDE=1600` に縮小してから MediaPipe に渡し、
+- `detect_landmarks()` は長辺 `DEFAULT_DETECT_MAX_SIDE=1600` に縮小してから MediaPipe に渡し、
   正規化座標を元画像ピクセルへ戻す。MediaPipe は内部でモデル入力サイズまで縮小するので
   巨大入力は精度に寄与しない（12MP を渡すのは RGB コピーと内部バッファの無駄）。
-  ROI は landmark 由来なので数px変わる（実写で 1100x577 → 1100x566）。ビット一致ではない
+  ROI は landmark 由来なので数px変わる（実写で 1100x577 → 1100x566）。ビット一致ではない。
+  `MATTE_DETECT_MAX_SIDE=0` で縮小を切れる（＝従来どおり元解像度で検出）。抽出する画素自体は
+  常に元画像のフル解像度から切るので、この設定は解像度・品質のトレードオフではない
 - `align_b_into_roi()` は ROI オフセットを affine に畳み込み、**ROI 窓だけ** warp する。
   `crop_roi(align_b_to_a(...), roi)` とビット一致（テストで担保）。全画面 warp を作らない
 - `crop_roi()` は view ではなくコピーを返す。view は元画像全体（12MPで36MB）を解放できなくする

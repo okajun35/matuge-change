@@ -48,7 +48,7 @@ class TestDetectLandmarksDownscales:
         lms = landmarks_module.detect_landmarks(big)
 
         h, w = seen["shape"]
-        assert max(h, w) <= landmarks_module.DETECT_MAX_SIDE
+        assert max(h, w) <= landmarks_module.DEFAULT_DETECT_MAX_SIDE
         assert (w / h) == pytest.approx(4000 / 3000, abs=1e-2)
         # 座標は元画像のピクセル系で返す
         assert lms[0] == pytest.approx([0.25 * 4000, 0.5 * 3000], abs=1.0)
@@ -94,6 +94,39 @@ class TestAlignIntoWindow:
         full = roi_module.crop_roi(alignment.align_b_to_a(img_a, synthetic_landmarks, img_b, lms_b), roi)
         windowed = alignment.align_b_into_roi(img_b, lms_b, synthetic_landmarks, roi)
         assert np.array_equal(windowed, full)
+
+
+class TestDetectMaxSideSetting:
+    """縮小を切れること（元解像度で検出したい場合の逃げ道）。"""
+
+    def test_defaults_to_1600(self, monkeypatch):
+        monkeypatch.delenv("MATTE_DETECT_MAX_SIDE", raising=False)
+        assert landmarks_module.detect_max_side() == 1600
+
+    def test_zero_disables_the_downscale(self, monkeypatch):
+        monkeypatch.setenv("MATTE_DETECT_MAX_SIDE", "0")
+        assert landmarks_module.detect_max_side() is None
+
+        seen: dict[str, tuple[int, int]] = {}
+
+        class FakeLandmarker:
+            def detect(self, image):
+                seen["shape"] = image.numpy_view().shape[:2]
+                return type("R", (), {"face_landmarks": []})()
+
+        monkeypatch.setattr(landmarks_module, "get_landmarker", lambda: FakeLandmarker())
+        landmarks_module.detect_landmarks(np.zeros((2000, 3000, 3), np.uint8))
+        assert seen["shape"] == (2000, 3000)
+
+    def test_custom_value_is_used(self, monkeypatch):
+        monkeypatch.setenv("MATTE_DETECT_MAX_SIDE", "800")
+        assert landmarks_module.detect_max_side() == 800
+
+    @pytest.mark.parametrize("raw", ["-1", "abc"])
+    def test_invalid_value_is_a_configuration_error(self, monkeypatch, raw):
+        monkeypatch.setenv("MATTE_DETECT_MAX_SIDE", raw)
+        with pytest.raises(ValueError, match="MATTE_DETECT_MAX_SIDE"):
+            landmarks_module.detect_max_side()
 
 
 class TestCropOwnsItsMemory:
