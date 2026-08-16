@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import cv2
 import numpy as np
 from fastapi import HTTPException, UploadFile
@@ -33,9 +35,24 @@ def to_http(error: Exception) -> HTTPException:
 
 
 def read_upload(file: UploadFile) -> np.ndarray:
-    buf = np.frombuffer(file.file.read(), np.uint8)
-    # 空バッファは cv2.imdecode が例外を投げる（同期途中・読み取り失敗のファイル）
-    img = cv2.imdecode(buf, cv2.IMREAD_COLOR) if buf.size else None
-    if img is None:
-        raise HTTPException(400, f"could not decode image: {file.filename}")
-    return img
+    return decode_upload(file)()
+
+
+def decode_upload(file: UploadFile) -> Callable[[], np.ndarray]:
+    """Defer decoding so the caller can decode one image at a time.
+
+    A phone photo is ~2MB compressed but ~36MB as an array; keeping the bytes and
+    decoding on demand is what lets a small host handle two uploads.
+    """
+    data = file.file.read()
+    filename = file.filename
+
+    def decode() -> np.ndarray:
+        # 空バッファは cv2.imdecode が例外を投げる（同期途中・読み取り失敗のファイル）
+        buf = np.frombuffer(data, np.uint8)
+        img = cv2.imdecode(buf, cv2.IMREAD_COLOR) if buf.size else None
+        if img is None:
+            raise HTTPException(400, f"could not decode image: {filename}")
+        return img
+
+    return decode

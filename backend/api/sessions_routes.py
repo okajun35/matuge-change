@@ -9,7 +9,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.api.container import container
-from backend.api.errors import read_upload, to_http
+from backend.api.errors import decode_upload, read_upload, to_http
 from backend.jobs.gate import matte_slot
 from backend.strokes.constraints import decode_constraints_png
 
@@ -62,11 +62,11 @@ async def create_session(
     image_without: UploadFile | None = File(None),
     roi_rect: str = Form(""),
 ):
-    img_a = read_upload(image_with)
-    img_b = read_upload(image_without) if image_without is not None else None
+    load_a = decode_upload(image_with)
+    load_b = decode_upload(image_without) if image_without is not None else None
     rect = _roi_rect(roi_rect)
     try:
-        return container().sessions.create(img_a, img_b, rect)
+        return container().sessions.create_lazily(load_a, load_b, rect)
     except Exception as exc:
         raise to_http(exc) from exc
 

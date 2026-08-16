@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from math import isfinite
@@ -10,9 +11,10 @@ from typing import Any
 import cv2
 import numpy as np
 
+from backend.jobs.memory import release_memory
 from backend.lash_extraction import (
     EyeRoi,
-    align_b_to_a,
+    align_b_into_roi,
     build_trimap,
     composite,
     compute_eye_roi,
@@ -33,6 +35,8 @@ from backend.lash_extraction import (
 from backend.sessions.errors import FaceNotDetected, MatteNotReady
 from backend.sessions.store import SessionStore
 
+logger = logging.getLogger("backend.matte")
+
 ProgressReporter = Callable[[int, str], None]
 
 
@@ -50,8 +54,26 @@ class SessionService:
         img_b: np.ndarray | None,
         roi_rect: tuple[float, float, float, float] | None = None,
     ) -> dict[str, Any]:
-        """Start a session. `roi_rect` gives the eye region for images without a
-        detectable face (profiles, eye close-ups); otherwise landmarks locate it."""
+        """Start a session from images already held in memory."""
+        return self.create_lazily(lambda: img_a, None if img_b is None else (lambda: img_b), roi_rect)
+
+    def create_lazily(
+        self,
+        load_a: Callable[[], np.ndarray],
+        load_b: Callable[[], np.ndarray] | None,
+        roi_rect: tuple[float, float, float, float] | None = None,
+    ) -> dict[str, Any]:
+        """Start a session, decoding one source image at a time.
+
+        `roi_rect` gives the eye region for images without a detectable face
+        (profiles, eye close-ups); otherwise landmarks locate it. The worn image
+        is persisted and released before the bare one is decoded: phone photos
+        are ~36MB each as arrays, and holding both plus a full-size aligned copy
+        is what pushes small hosts (512MB) over the limit.
+        """
+        img_a = load_a()
+        # a crash during analysis is usually about the source size, so log it before detection
+        logger.info("session create: worn image %dx%d", img_a.shape[1], img_a.shape[0])
         lms_a = detect_landmarks(img_a)
         if roi_rect is None and lms_a is None:
             raise FaceNotDetected("no face detected in the worn image")
@@ -60,26 +82,71 @@ class SessionService:
         roi = manual_eye_roi(roi_rect, img_a.shape) if manual else compute_eye_roi(lms_a, img_a.shape)
         roi_a = crop_roi(img_a, roi)
 
-        roi_b = None
-        if img_b is not None:
-            lms_b = detect_landmarks(img_b)
-            if lms_b is None and not manual:
-                raise FaceNotDetected("no face detected in the bare image")
-            aligned = img_b if lms_a is None or lms_b is None else align_b_to_a(img_a, lms_a, img_b, lms_b)
-            roi_b = ecc_refine(roi_a, crop_roi(aligned, roi))
-            evidence = difference_map(roi_a, roi_b)
-        else:
-            evidence = darkness_map(roi_a)
-
-        # no landmarks -> no eye prior to restrict the evidence with
-        prior = np.ones(roi_a.shape[:2]) if lms_a is None else eye_prior(roi_a.shape, lms_a, roi)
-        prob = initial_probability(evidence, prior)
-
         session_id = self.store.create()
-        # the uploads themselves are kept so a session can be re-derived later
-        self.store.save_image(session_id, "source_with", img_a)
-        if img_b is not None:
-            self.store.save_image(session_id, "source_without", img_b)
+        try:
+            # the uploads themselves are kept so a session can be re-derived later
+            self.store.save_image(session_id, "source_with", img_a)
+            del img_a
+            release_memory()
+
+            roi_b = None
+            if load_b is not None:
+                img_b = load_b()
+                lms_b = detect_landmarks(img_b)
+                if lms_b is None and not manual:
+                    raise FaceNotDetected("no face detected in the bare image")
+                self.store.save_image(session_id, "source_without", img_b)
+                aligned_roi = (
+                    crop_roi(img_b, roi)
+                    if lms_a is None or lms_b is None
+                    else align_b_into_roi(img_b, lms_b, lms_a, roi)
+                )
+                del img_b
+                release_memory()
+                roi_b = ecc_refine(roi_a, aligned_roi)
+                evidence = difference_map(roi_a, roi_b)
+            else:
+                evidence = darkness_map(roi_a)
+
+            # no landmarks -> no eye prior to restrict the evidence with
+            prior = np.ones(roi_a.shape[:2]) if lms_a is None else eye_prior(roi_a.shape, lms_a, roi)
+            prob = initial_probability(evidence, prior)
+            logger.info(
+                "session create: roi %dx%d scale=%.3f mode=%s",
+                roi_a.shape[1],
+                roi_a.shape[0],
+                roi.scale,
+                "manual" if manual else "auto",
+            )
+            return self._persist_created(
+                session_id,
+                roi,
+                roi_a,
+                roi_b,
+                lms_a,
+                evidence,
+                prob,
+                manual,
+                load_b is not None,
+            )
+        except Exception:
+            self.store.discard(session_id)
+            raise
+        finally:
+            release_memory()
+
+    def _persist_created(
+        self,
+        session_id: str,
+        roi: EyeRoi,
+        roi_a: np.ndarray,
+        roi_b: np.ndarray | None,
+        lms_a: np.ndarray | None,
+        evidence: np.ndarray,
+        prob: np.ndarray,
+        manual: bool,
+        has_bare_source: bool,
+    ) -> dict[str, Any]:
         self.store.save_image(session_id, "roi_a", roi_a)
         if roi_b is not None:
             self.store.save_image(session_id, "roi_b", roi_b)
@@ -104,7 +171,7 @@ class SessionService:
             ["roi_a"]
             + (["roi_b"] if roi_b is not None else [])
             + ["source_with"]
-            + (["source_without"] if img_b is not None else [])
+            + (["source_without"] if has_bare_source else [])
             + ["difference", "probability"]
         )
         return {
