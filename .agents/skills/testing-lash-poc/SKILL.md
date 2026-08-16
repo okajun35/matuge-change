@@ -12,17 +12,18 @@ description: How to run and UI-test the matuge-change lash alpha extraction PoC 
 
 ## UI testing tips
 - File inputs (装着画像 / 未装着画像) open the GTK file dialog; use Ctrl+L then type the absolute path.
-- Flow: upload → 解析開始 (~3s) → layer dropdown gets Original/Aligned/Difference/Probability → optional brush strokes (＋商品 = red / −背景 = blue) → Matting実行 (~1-2s) → status shows 再合成誤差 (typically ~6-8 for the sample photo pair) and Trimap/Alpha/Product RGBA/未装着画像へ再合成 layers appear.
+- Flow: upload → 解析開始 (~3s) → layer dropdown gets 目元ROI：装着 / 目元ROI：未装着 / Difference / Probability → optional brush strokes (＋商品 = red / −背景 = blue) → Matting実行 (~1-2s) → status shows 再合成誤差 (typically ~6-8 for the sample photo pair) and Trimap/Alpha/Product RGBA/再合成：未装着画像へ layers appear.
+- Layer dropdown is grouped by `LAYER_GROUPS` (入力画像（全体）→ 作業と結果 → 診断用 → 未解析プレビュー) and labels say what each image is; `roi_a` is 「目元ROI：装着（抽出元）」, NOT 未装着. Before a session exists the only option is a disabled placeholder, and picking a server-side layer without a session shows 「…はまだありません。このレイヤーは「解析開始」のあとに作られます。」.
 - Brush strokes are only sent to /api/matte if any non-transparent pixel exists on the paint canvas; ブラシ消去 clears them (verify by 再合成誤差 returning to the unconstrained value on re-run).
 - To verify brush constraints: view Alpha as baseline, paint −背景 over a white lash area, re-run matting — that area should turn black and 再合成誤差 changes.
 - Threshold sliders (FG閾値/BG閾値) only take effect on the next Matting実行; compare Trimap before/after.
-- Edge cases: worn image only (no bare) → darkness-based Probability, no Aligned/再合成 layers; non-face image → status shows `エラー: {"detail":"no face detected in the worn image"}` (HTTP 422).
+- Edge cases: worn image only (no bare) → darkness-based Probability, no 目元ROI：未装着 / 再合成 layers; non-face image → status shows `エラー: {"detail":"no face detected in the worn image"}` (HTTP 422).
 
 ## Recompose feature (commits 5340c84+)
-- Extra controls: 編集済み画像 file input + 再合成 button + 表示中レイヤーを保存 download link. Flow: new session → Matting実行 → select edited image → 再合成 → layer 「編集済み画像へ再合成」 auto-added and auto-shown; download link href tracks the visible layer (`/api/image/<session>/<layer>`).
+- Extra controls: 編集済み画像 file input + 再合成 button + 表示中レイヤーを保存 download link. Flow: new session → Matting実行 → select edited image → 再合成 → layer 「再合成：AI加工画像へ」 auto-added and auto-shown; download link href tracks the visible layer (`/api/image/<session>/<layer>`).
 - Requires a NEW session: /api/session now saves landmarks.npy; old sessions without it break /api/recompose.
 - Error cases: 再合成 before matting → status shows `エラー: {"detail":"run matting first"}` (409); no face in edited image → `no face detected in the edited image` (422).
-- Pitfall (fixed in 0a723a4): re-running Matting実行 used to drop 「編集済み画像へ再合成」 from the dropdown; now it is preserved.
+- Pitfall (fixed in 0a723a4): re-running Matting実行 used to drop 「再合成：AI加工画像へ」 from the dropdown; now it is preserved.
 
 ## Catalog page (`/` = frontend/index.html)
 - `/` is the catalog (静止画モードは /extract.html、動画は /video.html). Cards come from `GET /api/assets?limit=12&offset=..`; pytest runs leave plenty of dummy 48x48 assets (Japanese names) so the page is testable without extracting anything.
