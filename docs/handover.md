@@ -116,6 +116,43 @@
 詳細と改善優先順位は `docs/benchmark-findings.md`、指標定義と合成データの限界は `evaluation/README.md`。
 **Benchmarkの数値を良くするために production を変えてはいけない**（計測と改善のPRを分ける）。
 
+## 6.6 512MB ホストのメモリ（full / tiled の分離）
+
+Render Starter（512MB）で Matting を2回押すと OOM → 502 になった。原因は
+closed-form solve のピーク（解く画素数に比例、約 3MB/1000px）と、再合成が画像全体の
+float64 バッファを3枚作ること。依存ライブラリの常駐だけで約 287MB ある。
+
+採用した方式（設定値は README「Matting のメモリ設定（環境変数）」）:
+
+- `MATTE_SOLVE_MODE=full`（**既定**）— ROI 全体を一度に solve。`solve_window()` も使わない。
+  通常の有効な trimap では従来実装と**ビット一致**（実測 alpha/foreground の差 0.0）
+- `MATTE_SOLVE_MODE=tiled` — 低メモリ環境向けの**近似**。solve window を
+  `MATTE_MAX_SOLVE_PIXELS` 以下のタイルに割って解く
+- 再合成は旧 float64 式のまま行ストライプ（64行）単位で処理する。全体を一度に持たないだけで
+  出力はビット一致（テストで担保）。float32 化案は旧出力と一致しないため却下
+- 非同期は既定1 worker、同期 `POST /api/matte` と非同期ジョブの**両方**が成功・失敗どちらでも
+  `release_memory()`（`gc.collect()` + `malloc_trim(0)`）を通る
+- ラベル不足タイルを一律 alpha 0/1 にしてはいけない（矩形状の不連続を作る。full との
+  平均差 0.301・最大 0.797 を観測）。FG/BG が入るまで solve context を広げる
+
+実測ピークRSS（ユーザー提供の実写3枚、create → matte×2 → recompose、対策前は 556〜572MB）:
+
+| モード | native(1536x2048) | 1600px | 累積 |
+| --- | --- | --- | --- |
+| full（既定） | 489MB | 489MB | 2回目 +0MB |
+| tiled（60,000px） | 448MB | 448MB | 2回目 +1MB |
+
+tiled と full の差（**C層**: 合成ケースの回帰比較。実写精度ではない）:
+
+| ケース | alpha MAD | alpha 最大差 | Dice / Precision / Recall |
+| --- | --- | --- | --- |
+| 通常（FGラベル中央） | 0.0001 | 0.014 | 0.999 / 0.999 / 1.000 |
+| 広いUnknown＋離れたFG/BG | 0.042 | 0.527 | 0.914 / 0.841 / 1.000 |
+| 離れた商品領域2つ | 0.0004 | 0.064 | 0.998 / 0.995 / 1.000 |
+
+広いUnknownで差が残るのは近似の性質。メモリに余裕があるなら `full` を使う。生成物がどちらの
+モードかは実行履歴の `solve_mode` / `max_solve_pixels` で追跡できる。
+
 ## 7. 未検証・今後の課題
 
 - 手動ROIモードの実写検証（横顔画像でのAlpha品質）

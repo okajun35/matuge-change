@@ -13,23 +13,54 @@ from backend.lash_extraction.roi import EyeRoi
 
 # Closed-form matting allocates a sparse Laplacian and several float64 buffers over the
 # solved area, so its peak memory scales with the number of solved pixels (measured at
-# roughly 3MB per 1000 pixels on top of a ~250MB baseline). 512MB hosts (Render's starter
-# instance) cannot afford a full ROI solve; both knobs below bound it.
+# roughly 3MB per 1000 pixels on top of a ~290MB baseline). 512MB hosts (Render's starter
+# instance) cannot afford a whole-ROI solve, so they can opt into the tiled approximation.
+# Quality comes first everywhere else: `full` is the default and is the solve this
+# repository has always done.
+FULL = "full"
+TILED = "tiled"
+SOLVE_MODES = (FULL, TILED)
 SOLVE_MARGIN_PX = 32
 TILE_OVERLAP_PX = 24
 DEFAULT_MAX_SOLVE_PIXELS = 60_000
 
 
+def solve_mode() -> str:
+    """`MATTE_SOLVE_MODE`, defaulting to the full-quality solve."""
+    raw = os.environ.get("MATTE_SOLVE_MODE", "").strip().lower()
+    if not raw:
+        return FULL
+    if raw not in SOLVE_MODES:
+        raise ValueError(f"MATTE_SOLVE_MODE must be one of {SOLVE_MODES}, got {raw!r}")
+    return raw
+
+
 def max_solve_pixels() -> int | None:
-    """Pixel budget for one matting solve; `MATTE_MAX_SOLVE_PIXELS=0` disables the cap."""
+    """Pixel budget for one tiled solve; `MATTE_MAX_SOLVE_PIXELS=0` means unbounded.
+
+    Anything else that is not a pixel count is a configuration error rather than a silent
+    fallback: reading a typo as "unbounded" would put a 512MB host back on the OOM path.
+    """
     raw = os.environ.get("MATTE_MAX_SOLVE_PIXELS", "").strip()
     if not raw:
         return DEFAULT_MAX_SOLVE_PIXELS
     try:
         value = int(raw)
-    except ValueError:
-        return DEFAULT_MAX_SOLVE_PIXELS
-    return value if value > 0 else None
+    except ValueError as exc:
+        raise ValueError(
+            f"MATTE_MAX_SOLVE_PIXELS must be 0 (unbounded) or a positive pixel count, got {raw!r}"
+        ) from exc
+    if value < 0:
+        raise ValueError(
+            f"MATTE_MAX_SOLVE_PIXELS must be 0 (unbounded) or a positive pixel count, got {value}"
+        )
+    return value or None
+
+
+def solve_settings() -> tuple[str, int | None]:
+    """(mode, pixel budget) from the environment. The budget only exists in tiled mode."""
+    mode = solve_mode()
+    return mode, (max_solve_pixels() if mode == TILED else None)
 
 
 def build_trimap(
@@ -84,12 +115,6 @@ def _closed_form(roi: np.ndarray, trimap: np.ndarray) -> tuple[np.ndarray, np.nd
     return alpha, fg_bgr
 
 
-def _resolve_budget(value: int | None) -> int | None:
-    if value is None:
-        return max_solve_pixels()
-    return value if value > 0 else None
-
-
 Rect = tuple[int, int, int, int]
 
 
@@ -121,6 +146,26 @@ def tiles(h: int, w: int, budget: int | None) -> list[tuple[Rect, Rect]]:
     ]
 
 
+def _grown_to_hold_both_labels(trimap: np.ndarray, solved: Rect) -> Rect:
+    """Widen a solve rectangle until it contains known FG and BG, as the solver needs.
+
+    A tile can easily hold nothing but unknown pixels (a wide unknown band, or a large
+    user brush stroke). Answering 0 or 1 there would paint a rectangular block of hard
+    alpha over pixels the solver can resolve from labels just outside the tile, so the
+    context grows instead. The caller guarantees the enclosing window has both labels,
+    which bounds the growth.
+    """
+    y0, y1, x0, x1 = solved
+    h, w = trimap.shape[:2]
+    step = max(TILE_OVERLAP_PX, 1)
+    while True:
+        context = trimap[y0:y1, x0:x1]
+        if (context == 255).any() and (context == 0).any():
+            return y0, y1, x0, x1
+        y0, y1 = max(0, y0 - step), min(h, y1 + step)
+        x0, x1 = max(0, x0 - step), min(w, x1 + step)
+
+
 def _solve_tiles(
     roi: np.ndarray,
     trimap: np.ndarray,
@@ -130,48 +175,56 @@ def _solve_tiles(
 ) -> None:
     """Fill `alpha` / `fg_bgr` in place, one bounded tile of the window at a time."""
     h, w = trimap.shape[:2]
-    for (y0, y1, x0, x1), (cy0, cy1, cx0, cx1) in tiles(h, w, budget):
-        unknown = trimap[y0:y1, x0:x1] == 128
-        if not unknown.any():
+    for (y0, y1, x0, x1), solved in tiles(h, w, budget):
+        if not (trimap[y0:y1, x0:x1] == 128).any():
             continue
-        tile_trimap = trimap[cy0:cy1, cx0:cx1]
-        has_fg, has_bg = (tile_trimap == 255).any(), (tile_trimap == 0).any()
-        if not (has_fg and has_bg):
-            # closed-form needs both labels: without them the tile is entirely inside the
-            # product or entirely outside it, and the enclosing label is the answer
-            alpha[y0:y1, x0:x1][unknown] = 1.0 if has_fg else 0.0
-            continue
+        cy0, cy1, cx0, cx1 = _grown_to_hold_both_labels(trimap, solved)
         tile_alpha, tile_fg = _closed_form(
-            np.ascontiguousarray(roi[cy0:cy1, cx0:cx1]), np.ascontiguousarray(tile_trimap)
+            np.ascontiguousarray(roi[cy0:cy1, cx0:cx1]),
+            np.ascontiguousarray(trimap[cy0:cy1, cx0:cx1]),
         )
         sy, sx = y0 - cy0, x0 - cx0
         alpha[y0:y1, x0:x1] = tile_alpha[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
         fg_bgr[y0:y1, x0:x1] = tile_fg[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
 
 
+def _is_solvable(trimap: np.ndarray) -> bool:
+    """Closed-form matting needs something unknown and both labels to propagate from."""
+    return bool((trimap == 128).any() and (trimap == 255).any() and (trimap == 0).any())
+
+
 def run_matting(
-    roi_a: np.ndarray, trimap: np.ndarray, max_solve_pixels: int | None = None
+    roi_a: np.ndarray,
+    trimap: np.ndarray,
+    mode: str = FULL,
+    max_solve_pixels: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Closed-form matting + ML foreground estimation. Returns (alpha float, fg float BGR).
 
-    Only the window around the product is solved (see `solve_window`); outside it alpha
-    comes from the trimap and the foreground stays the source pixel. `max_solve_pixels`
-    caps one solve and defaults to the environment budget; a non-positive value solves
-    the whole window at once.
+    `full` (the default) solves the whole ROI in one system, which is what this repository
+    has always done. `tiled` is the low-memory approximation: it solves only the window
+    around the product (see `solve_window`), in pieces of at most `max_solve_pixels`
+    pixels (None = the whole window at once). Outside the window alpha comes from the
+    trimap and the foreground stays the source pixel.
+
+    Degenerate trimaps - nothing unknown, or missing a label to propagate from - are
+    answered from the trimap in both modes; pymatting raises on them.
     """
-    budget = _resolve_budget(max_solve_pixels)
+    if mode not in SOLVE_MODES:
+        raise ValueError(f"solve mode must be one of {SOLVE_MODES}, got {mode!r}")
+    if not _is_solvable(trimap):
+        return np.where(trimap == 255, 1.0, 0.0), roi_a.astype(np.float64) / 255.0
+    if mode == FULL:
+        return _closed_form(roi_a, trimap)
     alpha = np.where(trimap == 255, 1.0, 0.0)
     fg_bgr = roi_a.astype(np.float64) / 255.0
-    window = solve_window(trimap)
-    if window is None or not (trimap == 128).any():
-        return alpha, fg_bgr
-    y0, y1, x0, x1 = window
+    y0, y1, x0, x1 = solve_window(trimap)
     _solve_tiles(
         roi_a[y0:y1, x0:x1],
         trimap[y0:y1, x0:x1],
         alpha[y0:y1, x0:x1],
         fg_bgr[y0:y1, x0:x1],
-        budget,
+        max_solve_pixels,
     )
     return alpha, fg_bgr
 
@@ -182,18 +235,27 @@ def composite(alpha: np.ndarray, fg_bgr: np.ndarray, base_bgr: np.ndarray) -> np
     return (np.clip(out, 0, 1) * 255).astype(np.uint8)
 
 
-def blend_rgba_over(rgba: np.ndarray, base_bgr: np.ndarray) -> np.ndarray:
-    """Alpha blend an RGBA layer over `base_bgr`, one channel at a time in float32.
+BLEND_ROWS_PER_CHUNK = 64
 
-    A full frame costs 12 bytes per pixel in float32 against 24 in float64, and the
-    float64 version needed three such frames at once: too much beside a ~290MB baseline
-    on a 512MB host.
+
+def blend_rgba_over(
+    rgba: np.ndarray, base_bgr: np.ndarray, rows_per_chunk: int = BLEND_ROWS_PER_CHUNK
+) -> np.ndarray:
+    """Alpha blend an RGBA layer over `base_bgr` in horizontal stripes.
+
+    The arithmetic and the float64 precision are the ones this repository has always
+    used, so the output is identical pixel for pixel; only the float64 buffers shrink
+    from three whole frames (24 bytes per pixel each, +120..160MB on a phone photo) to a
+    stripe at a time.
     """
-    alpha = rgba[..., 3].astype(np.float32) / 255.0
-    out = base_bgr.astype(np.float32)
-    for channel in range(3):
-        out[..., channel] += alpha * (rgba[..., channel] - out[..., channel])
-    return np.clip(out, 0, 255).astype(np.uint8)
+    out = np.empty_like(base_bgr)
+    for y0 in range(0, base_bgr.shape[0], rows_per_chunk):
+        y1 = min(base_bgr.shape[0], y0 + rows_per_chunk)
+        alpha = rgba[y0:y1, :, 3:4].astype(np.float64) / 255.0
+        fg = rgba[y0:y1, :, :3].astype(np.float64) / 255.0
+        base = base_bgr[y0:y1].astype(np.float64) / 255.0
+        out[y0:y1] = (np.clip(alpha * fg + (1.0 - alpha) * base, 0, 1) * 255).astype(np.uint8)
+    return out
 
 
 def recompose_onto(

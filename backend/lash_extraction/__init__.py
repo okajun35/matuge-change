@@ -20,6 +20,7 @@ from backend.lash_extraction.matting import (
     recompose_onto,
     reconstruction_error,
     run_matting,
+    solve_settings,
 )
 from backend.lash_extraction.product import product_bbox
 from backend.lash_extraction.roi import (
@@ -55,4 +56,5 @@ __all__ = [
     "recompose_onto",
     "reconstruction_error",
     "run_matting",
+    "solve_settings",
 ]

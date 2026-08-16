@@ -5,6 +5,7 @@ import shutil
 import cv2
 import numpy as np
 
+from backend.api import sessions_routes
 from backend.app import DATA_DIR
 
 
@@ -79,5 +80,40 @@ class TestRunHistoryApi:
         assert runs[0]["params"]["fg_thresh"] == 0.70
         assert isinstance(runs[0]["reconstruction_error"], float)
 
+    def test_run_records_which_solve_produced_it(self, client, matted_session):
+        """Tiled results are approximations, so a stored layer must say how it was solved."""
+        runs = client.get(f"/api/sessions/{matted_session}/runs").json()["runs"]
+        assert runs[0]["solve_mode"] == "full"
+        assert runs[0]["max_solve_pixels"] is None
+
+    def test_a_tiled_run_records_its_budget(self, client, session_id, monkeypatch):
+        monkeypatch.setenv("MATTE_SOLVE_MODE", "tiled")
+        monkeypatch.setenv("MATTE_MAX_SOLVE_PIXELS", "20000")
+
+        assert client.post("/api/matte", data={"session_id": session_id}).status_code == 200
+
+        runs = client.get(f"/api/sessions/{session_id}/runs").json()["runs"]
+        assert runs[-1]["solve_mode"] == "tiled"
+        assert runs[-1]["max_solve_pixels"] == 20000
+
     def test_unknown_session_returns_404(self, client):
         assert client.get("/api/sessions/nope/runs").status_code == 404
+
+
+class TestSynchronousMatteReleasesMemory:
+    """The sync endpoint peaks as high as the job runner, so it needs the same boundary."""
+
+    def test_memory_is_released_after_a_successful_matte(self, client, session_id, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(sessions_routes, "release_memory", lambda: calls.append("released"))
+
+        assert client.post("/api/matte", data={"session_id": session_id}).status_code == 200
+        assert calls == ["released"]
+
+    def test_memory_is_released_after_a_failed_matte(self, client, session_id, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(sessions_routes, "release_memory", lambda: calls.append("released"))
+        monkeypatch.setenv("MATTE_SOLVE_MODE", "turbo")  # rejected configuration
+
+        assert client.post("/api/matte", data={"session_id": session_id}).status_code >= 400
+        assert calls == ["released"]

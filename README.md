@@ -249,6 +249,30 @@ export SUPABASE_SERVICE_ROLE_KEY=...   # サーバー専用（ブラウザへは
 export SUPABASE_PUBLISHABLE_KEY=...    # Realtime 購読用
 ```
 
+### Matting のメモリ設定（環境変数）
+
+Matting（closed-form solve）のピークメモリは解く画素数に比例し、実測で約 3MB / 1000px。
+依存ライブラリの常駐が約 287MB あるため、Render Starter のような 512MB ホストでは ROI 全体を
+一度に解くと OOM（502）になる。既定は**品質優先の full**で、低メモリ環境だけ tiled に切り替える。
+
+| 環境変数 | 既定値 | 意味 |
+| --- | --- | --- |
+| `MATTE_SOLVE_MODE` | `full` | `full` = ROI 全体を一度に solve（従来と同じ出力）。`tiled` = solve window をタイル分割する低メモリ近似。それ以外の値は設定エラー |
+| `MATTE_MAX_SOLVE_PIXELS` | `60000` | tiled モードでの 1 solve あたりの画素上限。`0` は明示的な無制限。負数・数値でない文字列は設定エラー（誤設定で上限が外れて OOM に戻るのを防ぐ）。full モードでは使わない |
+| `MATTE_MAX_WORKERS` | `1` | 非同期 Matting ジョブの並列数。1 ならピークを作る処理が同時に走らない |
+
+Render など 512MB 環境のみ以下を設定する。
+
+```bash
+MATTE_SOLVE_MODE=tiled
+MATTE_MAX_SOLVE_PIXELS=60000
+MATTE_MAX_WORKERS=1
+```
+
+`tiled` は full solve の**近似**であり、full と完全一致はしない（比較値は
+`docs/handover.md`）。メモリに余裕がある環境では既定の `full` を使う。どちらで生成したかは
+実行履歴（`GET /api/sessions/{id}/runs`）の `solve_mode` / `max_solve_pixels` に残る。
+
 ## 使い方（静止画モード: `/extract.html`）
 
 1. 装着画像（必要なら未装着画像も）をアップロードして「解析開始」
