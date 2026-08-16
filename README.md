@@ -453,7 +453,7 @@ H.264 / yuv420p で MP4 出力
   最終 MP4 は H.264 再エンコードを経る
 
 ## サーバについて
-renderにあげたサンプル（https://matuge-change.onrender.com/extract.html）だとメモリ不足のため解析中に落ちてしまうためプレゼンで見せる場合はlocalhostで見せます
+https://matuge-change.onrender.com/　で起動中。カタログにサンプルを保存してます
 
 ## セットアップ（Docker / WSL 推奨）
 
