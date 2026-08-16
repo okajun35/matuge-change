@@ -118,52 +118,139 @@ def _closed_form(roi: np.ndarray, trimap: np.ndarray) -> tuple[np.ndarray, np.nd
 Rect = tuple[int, int, int, int]
 
 
-def tiles(h: int, w: int, budget: int | None) -> list[tuple[Rect, Rect]]:
-    """Cut h x w into (written, solved) rectangles, each solved one inside `budget`.
+def tiles(h: int, w: int, budget: int | None) -> list[Rect]:
+    """Cut h x w into rectangles small enough to be solved with context inside `budget`.
 
     Downscaling the solve instead would smear the hair-thin alpha detail the extraction
     exists for, so the window is cut into square-ish pieces solved at full resolution.
-    Every piece is solved with surrounding context and only its centre is written, so a
-    tile edge does not become a seam in the alpha.
+    Each piece is solved with surrounding context (`_label_aware_context`) and only the
+    piece itself is written, so a tile edge does not become a seam in the alpha.
     """
     if budget is None or h * w <= budget:
-        return [((0, h, 0, w), (0, h, 0, w))]
+        return [(0, h, 0, w)]
     side = max(1, int(budget**0.5))
-    overlap = min(TILE_OVERLAP_PX, side // 4)
-    step = max(1, side - 2 * overlap)
-    return [
-        (
-            (y, min(h, y + step), x, min(w, x + step)),
-            (
-                max(0, y - overlap),
-                min(h, y + step + overlap),
-                max(0, x - overlap),
-                min(w, x + step + overlap),
-            ),
-        )
-        for y in range(0, h, step)
-        for x in range(0, w, step)
-    ]
+    step = max(1, side - 2 * min(TILE_OVERLAP_PX, side // 4))
+    return [(y, min(h, y + step), x, min(w, x + step)) for y in range(0, h, step) for x in range(0, w, step)]
 
 
-def _grown_to_hold_both_labels(trimap: np.ndarray, solved: Rect) -> Rect:
+def _holds_both_labels(trimap: np.ndarray, rect: Rect) -> bool:
+    y0, y1, x0, x1 = rect
+    context = trimap[y0:y1, x0:x1]
+    return bool((context == 255).any() and (context == 0).any())
+
+
+def _within(rect: Rect, budget: int | None) -> bool:
+    y0, y1, x0, x1 = rect
+    return budget is None or (y1 - y0) * (x1 - x0) <= budget
+
+
+def _grown_to_hold_both_labels(trimap: np.ndarray, solved: Rect, budget: int | None) -> Rect | None:
     """Widen a solve rectangle until it contains known FG and BG, as the solver needs.
 
     A tile can easily hold nothing but unknown pixels (a wide unknown band, or a large
     user brush stroke). Answering 0 or 1 there would paint a rectangular block of hard
     alpha over pixels the solver can resolve from labels just outside the tile, so the
-    context grows instead. The caller guarantees the enclosing window has both labels,
-    which bounds the growth.
+    context grows instead - but never past the budget, which is the whole reason the mode
+    exists. Returns None when no budget-sized square context around the tile has both
+    labels; `_label_aware_context` then reshapes the context instead of growing it.
     """
     y0, y1, x0, x1 = solved
     h, w = trimap.shape[:2]
     step = max(TILE_OVERLAP_PX, 1)
     while True:
-        context = trimap[y0:y1, x0:x1]
-        if (context == 255).any() and (context == 0).any():
+        if _holds_both_labels(trimap, (y0, y1, x0, x1)):
             return y0, y1, x0, x1
-        y0, y1 = max(0, y0 - step), min(h, y1 + step)
-        x0, x1 = max(0, x0 - step), min(w, x1 + step)
+        grown = (max(0, y0 - step), min(h, y1 + step), max(0, x0 - step), min(w, x1 + step))
+        if grown == (y0, y1, x0, x1) or not _within(grown, budget):
+            return None
+        y0, y1, x0, x1 = grown
+
+
+def _padded(written: Rect, h: int, w: int, budget: int | None) -> Rect:
+    """`written` with the widest ring of context that still fits the budget.
+
+    The ring is what keeps a tile edge from becoming a seam in the alpha: the solver reads
+    it, only the tile itself is written back.
+    """
+    for pad in range(TILE_OVERLAP_PX, 0, -1):
+        candidate = (
+            max(0, written[0] - pad),
+            min(h, written[1] + pad),
+            max(0, written[2] - pad),
+            min(w, written[3] + pad),
+        )
+        if _within(candidate, budget):
+            return candidate
+    return written
+
+
+def _centred(span: tuple[int, int], length: int, size: int) -> tuple[int, int]:
+    """A span of `length` pixels centred on `span`, clamped inside [0, size]."""
+    start = min(max(0, (span[0] + span[1] - length) // 2), size - length)
+    return start, start + length
+
+
+def _label_aware_context(trimap: np.ndarray, written: Rect, budget: int | None) -> Rect | None:
+    """Smallest rectangle around `written` that holds both labels and fits the budget.
+
+    Tried in order of how local - and so how close to a full solve - the result is: a
+    square-ish context grown outwards, then the tallest column and the widest row through
+    the tile that the budget pays for. The strips reach labels sitting at opposite ends of
+    the window (a wide unknown band with FG far below and BG far above), where a square
+    context holding both would be many times the budget. Returns None when the budget buys
+    no such rectangle; the caller then splits the tile and tries again.
+    """
+    h, w = trimap.shape[:2]
+    square = _grown_to_hold_both_labels(trimap, _padded(written, h, w, budget), budget)
+    if square is not None:
+        return square
+    limit = budget or h * w
+    rows, cols = (written[0], written[1]), (written[2], written[3])
+    tile_h, tile_w = rows[1] - rows[0], cols[1] - cols[0]
+    column_w = max(tile_w, min(w, limit // h))
+    row_h = max(tile_h, min(h, limit // w))
+    for candidate in (
+        (
+            *_centred(rows, max(tile_h, min(h, limit // column_w)), h),
+            *_centred(cols, column_w, w),
+        ),
+        (
+            *_centred(rows, row_h, h),
+            *_centred(cols, max(tile_w, min(w, limit // row_h)), w),
+        ),
+    ):
+        if _within(candidate, budget) and _holds_both_labels(trimap, candidate):
+            return candidate
+    return None
+
+
+def _bounded_tiles(trimap: np.ndarray, written: Rect, budget: int | None) -> list[tuple[Rect, Rect]]:
+    """(written, solved) pairs covering `written`, every solve inside the budget.
+
+    When no budget-sized context around a tile holds both labels, the tile is halved and
+    each half retried: a narrower tile allows a taller context for the same pixel count,
+    which is how a distant label is reached without exceeding the budget. Solving a
+    label-less tile as hard 0/1 instead would paint a rectangular block of flat alpha.
+    """
+    y0, y1, x0, x1 = written
+    if not (trimap[y0:y1, x0:x1] == 128).any():
+        return []
+    context = _label_aware_context(trimap, written, budget)
+    if context is not None:
+        return [(written, context)]
+    if y1 - y0 <= 1 and x1 - x0 <= 1:
+        raise ValueError(
+            "MATTE_MAX_SOLVE_PIXELS is too small to solve this trimap: no solve region "
+            f"within {budget} pixels contains both foreground and background labels. "
+            "Raise the budget (or set MATTE_SOLVE_MODE=full) to matte this image."
+        )
+    if y1 - y0 >= x1 - x0:
+        mid = (y0 + y1) // 2
+        halves = ((y0, mid, x0, x1), (mid, y1, x0, x1))
+    else:
+        mid = (x0 + x1) // 2
+        halves = ((y0, y1, x0, mid), (y0, y1, mid, x1))
+    return [pair for half in halves for pair in _bounded_tiles(trimap, half, budget)]
 
 
 def _solve_tiles(
@@ -175,17 +262,15 @@ def _solve_tiles(
 ) -> None:
     """Fill `alpha` / `fg_bgr` in place, one bounded tile of the window at a time."""
     h, w = trimap.shape[:2]
-    for (y0, y1, x0, x1), solved in tiles(h, w, budget):
-        if not (trimap[y0:y1, x0:x1] == 128).any():
-            continue
-        cy0, cy1, cx0, cx1 = _grown_to_hold_both_labels(trimap, solved)
-        tile_alpha, tile_fg = _closed_form(
-            np.ascontiguousarray(roi[cy0:cy1, cx0:cx1]),
-            np.ascontiguousarray(trimap[cy0:cy1, cx0:cx1]),
-        )
-        sy, sx = y0 - cy0, x0 - cx0
-        alpha[y0:y1, x0:x1] = tile_alpha[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
-        fg_bgr[y0:y1, x0:x1] = tile_fg[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
+    for written in tiles(h, w, budget):
+        for (y0, y1, x0, x1), (cy0, cy1, cx0, cx1) in _bounded_tiles(trimap, written, budget):
+            tile_alpha, tile_fg = _closed_form(
+                np.ascontiguousarray(roi[cy0:cy1, cx0:cx1]),
+                np.ascontiguousarray(trimap[cy0:cy1, cx0:cx1]),
+            )
+            sy, sx = y0 - cy0, x0 - cx0
+            alpha[y0:y1, x0:x1] = tile_alpha[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
+            fg_bgr[y0:y1, x0:x1] = tile_fg[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
 
 
 def _is_solvable(trimap: np.ndarray) -> bool:
@@ -204,8 +289,10 @@ def run_matting(
     `full` (the default) solves the whole ROI in one system, which is what this repository
     has always done. `tiled` is the low-memory approximation: it solves only the window
     around the product (see `solve_window`), in pieces of at most `max_solve_pixels`
-    pixels (None = the whole window at once). Outside the window alpha comes from the
-    trimap and the foreground stays the source pixel.
+    pixels - a hard bound on every solve, context included (0 or None = the whole window
+    at once). Outside the window alpha comes from the trimap and the foreground stays the
+    source pixel. A budget too small to ever reach both labels raises rather than falling
+    back to a whole-window solve, which is the OOM the mode exists to avoid.
 
     Degenerate trimaps - nothing unknown, or missing a label to propagate from - are
     answered from the trimap in both modes; pymatting raises on them.
@@ -224,7 +311,7 @@ def run_matting(
         trimap[y0:y1, x0:x1],
         alpha[y0:y1, x0:x1],
         fg_bgr[y0:y1, x0:x1],
-        max_solve_pixels,
+        max_solve_pixels or None,
     )
     return alpha, fg_bgr
 

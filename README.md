@@ -258,8 +258,8 @@ Matting（closed-form solve）のピークメモリは解く画素数に比例�
 | 環境変数 | 既定値 | 意味 |
 | --- | --- | --- |
 | `MATTE_SOLVE_MODE` | `full` | `full` = ROI 全体を一度に solve（従来と同じ出力）。`tiled` = solve window をタイル分割する低メモリ近似。それ以外の値は設定エラー |
-| `MATTE_MAX_SOLVE_PIXELS` | `60000` | tiled モードでの 1 solve あたりの画素上限。`0` は明示的な無制限。負数・数値でない文字列は設定エラー（誤設定で上限が外れて OOM に戻るのを防ぐ）。full モードでは使わない |
-| `MATTE_MAX_WORKERS` | `1` | 非同期 Matting ジョブの並列数。1 ならピークを作る処理が同時に走らない |
+| `MATTE_MAX_SOLVE_PIXELS` | `60000` | tiled モードでの 1 solve あたりの画素上限。**context（ラベル探索で広げた範囲）を含めた solver 入力の絶対上限**で、超える solve は行わない。`0` は明示的な無制限。負数・数値でない文字列は設定エラー（誤設定で上限が外れて OOM に戻るのを防ぐ）。full モードでは使わない |
+| `MATTE_MAX_WORKERS` | `1` | Matting の同時実行数。同期 `POST /api/matte` と非同期ジョブが**同じプロセス共通ゲート**を通るので、1 ならピークを作る処理がプロセス全体で同時に走らない |
 
 Render など 512MB 環境のみ以下を設定する。
 
@@ -272,6 +272,12 @@ MATTE_MAX_WORKERS=1
 `tiled` は full solve の**近似**であり、full と完全一致はしない（比較値は
 `docs/handover.md`）。メモリに余裕がある環境では既定の `full` を使う。どちらで生成したかは
 実行履歴（`GET /api/sessions/{id}/runs`）の `solve_mode` / `max_solve_pixels` に残る。
+
+tiled の各 solve には FG/BG 両ラベルが必要なので、タイル内にラベルが無ければ画素上限の範囲で
+context を広げ、それでも届かない場合は上限内で**縦長／横長の帯**に変形し、さらにタイルを分割して
+探す（上限は常に守る）。上限が小さすぎてどう分割してもラベルに届かない場合は
+`MATTE_MAX_SOLVE_PIXELS` を上げる／`full` にするよう促す**設定エラー**にする。黙って ROI 全体を
+解いて OOM に戻ることも、Unknown を一律 0/1 に潰すこともしない。
 
 ## 使い方（静止画モード: `/extract.html`）
 

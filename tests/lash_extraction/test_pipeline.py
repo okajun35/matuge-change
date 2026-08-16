@@ -467,6 +467,49 @@ class TestTiledSolve:
         assert not (middle == 1.0).all()
         assert not (middle == 0.0).all()
 
+    def test_reaching_a_distant_label_still_respects_the_budget(self, monkeypatch):
+        """Growing a tile until it holds both labels must not undo the memory bound.
+
+        The budget is the whole point of the mode: an unbounded search for a label puts a
+        512MB host back on the OOM path (and solves the window many times over).
+        """
+        seen = _spy_on_solver(monkeypatch)
+        rng = np.random.default_rng(17)
+        img = rng.integers(0, 256, size=(120, 120, 3), dtype=np.uint8)
+        trimap = np.full((120, 120), 128, np.uint8)
+        trimap[0:6, :] = 0
+        trimap[114:120, :] = 255
+        budget = 2_500
+
+        matting_module.run_matting(img, trimap, mode="tiled", max_solve_pixels=budget)
+
+        assert seen and all(h * w <= budget for h, w in seen)
+
+    def test_a_budget_that_cannot_reach_a_label_is_rejected_instead_of_ignored(self):
+        """The alternative - solving anyway - is the whole-window solve that OOM-kills a
+        512MB host, so an impossible budget is a configuration error the caller can read."""
+        rng = np.random.default_rng(23)
+        img = rng.integers(0, 256, size=(120, 120, 3), dtype=np.uint8)
+        trimap = np.full((120, 120), 128, np.uint8)
+        trimap[0:6, :] = 0
+        trimap[114:120, :] = 255
+
+        with pytest.raises(ValueError, match="MATTE_MAX_SOLVE_PIXELS"):
+            matting_module.run_matting(img, trimap, mode="tiled", max_solve_pixels=50)
+
+    def test_a_roi_sized_window_with_distant_labels_respects_the_budget(self, monkeypatch):
+        seen = _spy_on_solver(monkeypatch)
+        rng = np.random.default_rng(19)
+        img = rng.integers(0, 256, size=(600, 1100, 3), dtype=np.uint8)
+        trimap = np.full((600, 1100), 128, np.uint8)
+        trimap[0:8, :] = 0
+        trimap[592:600, :] = 255
+        budget = 60_000
+
+        matting_module.run_matting(img, trimap, mode="tiled", max_solve_pixels=budget)
+
+        assert seen and all(h * w <= budget for h, w in seen)
+
     def test_tiles_without_unknown_pixels_are_not_solved(self, monkeypatch):
         seen = _spy_on_solver(monkeypatch)
         rng = np.random.default_rng(12)

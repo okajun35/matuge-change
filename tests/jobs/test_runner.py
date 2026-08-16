@@ -72,7 +72,7 @@ class TestMatteJobRunner:
 
     def test_memory_is_released_after_every_job(self, monkeypatch):
         released = []
-        monkeypatch.setattr("backend.jobs.runner.release_memory", lambda: released.append(True))
+        monkeypatch.setattr("backend.jobs.gate.release_memory", lambda: released.append(True))
         runner = MatteJobRunner(InMemoryJobRepository())
 
         runner.wait(runner.submit("sess1", {}, lambda report: {"layers": []}), timeout=10)

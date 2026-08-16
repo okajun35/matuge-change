@@ -1,12 +1,14 @@
 import json
 import os
 import shutil
+import threading
 
 import cv2
 import numpy as np
 
-from backend.api import sessions_routes
+from backend.api.container import container
 from backend.app import DATA_DIR
+from backend.jobs import gate as gate_module
 
 
 class TestGetSession:
@@ -100,19 +102,54 @@ class TestRunHistoryApi:
         assert client.get("/api/sessions/nope/runs").status_code == 404
 
 
+class TestMattingIsSerialisedAcrossBothApis:
+    """`MATTE_MAX_WORKERS=1` must bound the sync endpoint and the job queue together."""
+
+    def test_the_sync_endpoint_waits_for_a_running_job(self, client, session_id, monkeypatch):
+        monkeypatch.delenv("MATTE_MAX_WORKERS", raising=False)
+        observed: list[int] = []
+        job_started, let_job_finish = threading.Event(), threading.Event()
+
+        def slow_matte(*_args, **_kwargs):
+            observed.append(gate_module.active_mattings())
+            job_started.set()
+            let_job_finish.wait(timeout=10)
+            return {"layers": []}
+
+        monkeypatch.setattr(container().sessions, "run_matte", slow_matte)
+        job = client.post("/api/matte/jobs", data={"session_id": session_id}).json()["job_id"]
+        assert job_started.wait(timeout=10)
+
+        sync_done = threading.Event()
+
+        def call_sync():
+            client.post("/api/matte", data={"session_id": session_id})
+            sync_done.set()
+
+        caller = threading.Thread(target=call_sync)
+        caller.start()
+        assert not sync_done.wait(timeout=1.0)  # blocked behind the job's slot
+
+        let_job_finish.set()
+        caller.join(timeout=10)
+        container().jobs.wait(job, timeout=10)
+
+        assert observed == [1, 1]  # never two mattings inside the gate at once
+
+
 class TestSynchronousMatteReleasesMemory:
     """The sync endpoint peaks as high as the job runner, so it needs the same boundary."""
 
     def test_memory_is_released_after_a_successful_matte(self, client, session_id, monkeypatch):
         calls: list[str] = []
-        monkeypatch.setattr(sessions_routes, "release_memory", lambda: calls.append("released"))
+        monkeypatch.setattr(gate_module, "release_memory", lambda: calls.append("released"))
 
         assert client.post("/api/matte", data={"session_id": session_id}).status_code == 200
         assert calls == ["released"]
 
     def test_memory_is_released_after_a_failed_matte(self, client, session_id, monkeypatch):
         calls: list[str] = []
-        monkeypatch.setattr(sessions_routes, "release_memory", lambda: calls.append("released"))
+        monkeypatch.setattr(gate_module, "release_memory", lambda: calls.append("released"))
         monkeypatch.setenv("MATTE_SOLVE_MODE", "turbo")  # rejected configuration
 
         assert client.post("/api/matte", data={"session_id": session_id}).status_code >= 400
