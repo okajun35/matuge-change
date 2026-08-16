@@ -120,6 +120,8 @@ Amazonで商品を販売する場合、購入者は主に商品画像・動画�
 
 といった変化が起こる。
 
+![生成AIで人物を変更すると、まつ毛（商品）まで変わってしまう](images/problem-generative-ai-changes-product.png)
+
 見た目としては自然で美しい画像が生成されたとしても、そこに写っているつけまつげが、実際に販売している商品と異なるのであれば、ECの商品画像として使用することはできない。
 
 #### ECでは「似ている商品」では不十分
@@ -176,6 +178,11 @@ AIによって人物表現を変えるメリットを活用しながら、ECで�
 
 を用いて検証します。
 
+![対象商品のつけまつ毛（毛足が長く、細い毛先が多数存在する）](images/product-eyelash-example.png)
+
+毛足が長く細い毛先が多数あるダンス・ステージ用途の商品で、画像処理としては難しい条件になる
+（詳細は [docs/static-image-algorithm.md](docs/static-image-algorithm.md)「対象物としての難しさ」）。
+
 まずは1商品で、**実際の商品をどこまで維持しながら人物だけを変更できるか**を重視します。
 
 ### 4. 最も重要な要件
@@ -219,6 +226,46 @@ AIモデルへ人物を変更した結果、元の商品とは異なる「似た
 
 というコア部分の実現と検証に取り組みます。
 
+## なぜ商品を生成AIに任せないのか
+
+生成AIに「商品は変更しないで」と指示することはできますが、
+出力された商品が元画像と同一であることを保証することはできません。
+
+ECの商品画像では、「似た商品」ではなく、
+**実際に販売する商品の形状・毛束・長さ・カール・装着状態を維持すること**が重要です。
+
+そこで本プロジェクトでは、
+
+> **「生成AIに商品を正しく描かせる」のではなく、
+> 「商品を生成AIの処理対象から外す」**
+
+という設計を採用しています。
+
+商品領域は元画像・元動画から抽出または保持し、
+生成AIには人物側の加工を担当させ、
+最後に商品を画像処理で再合成します。
+
+```text
+元画像 / 元動画
+   │
+   ├─ 商品領域 ──────────────┐
+   │      抽出・保持          │
+   │                         │
+   └─ 人物領域               │
+          ↓                  │
+       生成AIで加工           │
+          ↓                  │
+          └──────────────→ 再合成
+```
+
+この設計では、生成AIの自由度と、商品の同一性・再現性をできるだけ分離します。
+
+なお、本システムは「AIを使わない画像処理」ではありません。
+顔・目元の位置推定には MediaPipe Face Landmarker の機械学習モデルを利用します。
+一方で、**商品まつ毛そのものを生成AIに再生成させることは避ける**、というのが設計上の中心方針です。
+
+詳細は [docs/design-philosophy.md](docs/design-philosophy.md) を参照。
+
 ## 商品保持の考え方（Generative Product Preserve）
 
 本プロジェクトの不変の目標は「商品を生成AIに描き直させない」こと。商品領域は実物の
@@ -230,6 +277,117 @@ AIモデルへ人物を変更した結果、元の商品とは異なる「似た
   形状（長さ・毛束・間隔・カール・毛先方向）と縦横比は保持するが、Matting の前景色推定と
   補間リサンプルを通るため、元画像とピクセル単位で一致するわけではない。
   自由変形・パースペクティブ・生成AIによる描き直しは行わない。
+
+## 静止画 / 動画モードの技術構成
+
+本プロジェクトでは、静止画と動画で同じ抽出方式を使っていない。
+
+静止画は **商品まつ毛を Alpha Matte として抽出して再合成**する。一方、動画はフレームごとの Alpha 抽出によるちらつきと、まばたき時の形状変化を避けるため、**元動画の目元領域をまるごと残して AI 加工画像側を動かす**方式を採用している。
+
+また、本システムは「AIを使わない画像処理」ではない。顔・目元の検出には **MediaPipe Face Landmarker** の機械学習モデルを利用する。一方で、商品まつ毛専用の学習済みセグメンテーションモデルや、生成AIによる商品まつ毛の再生成は行わない。
+
+### 技術比較
+
+| 技術 / 処理 | 静止画 | 動画 | 用途 |
+| --- | :---: | :---: | --- |
+| MediaPipe Face Landmarker | ○ | ○ | 顔・目ランドマーク検出 |
+| 目元 ROI 自動生成 | ○ | ○ | 処理対象を目周辺へ限定 |
+| Landmark Affine | ○ | ○ | 顔位置の対応付け |
+| ECC alignment | ○ | × | 静止画の装着 / 未装着画像の微調整 |
+| Difference Map | ○ | × | 装着前後の見た目の変化を抽出 |
+| Darkening / Chroma / Gradient Evidence | ○ | × | まつ毛候補の推定 |
+| Eye Prior | ○ | × | 目周辺の候補を優先 |
+| Probability Map | ○ | × | 商品候補確率 |
+| 3値ブラシ補正 | ○ | × | FG / Unknown / BG の手動補正 |
+| Trimap | ○ | × | Matting 用3値マスク |
+| PyMatting | ○ | × | Alpha / Foreground RGB 推定 |
+| Product RGBA | ○ | × | 抽出した商品まつ毛レイヤー |
+| 目元領域 Soft Mask | × | ○ | 元動画の目元全体を保持 |
+| 元商品側の warp | ○ 相似変換のみ | × | 動画では商品側を変形しない |
+| AI 加工画像側の warp | × | ○ | 各動画フレームの顔位置へ合わせる |
+| Alpha Blend | ○ | ○ | 最終合成 |
+| まばたき追従 | △ | ○ | 動画は元フレーム自体を使う |
+| H.264 再エンコード | × | ○ | MP4 出力 |
+
+### 静止画モードの処理
+
+静止画では、装着画像と任意の未装着画像から目元を抽出し、画像差分と目位置の prior を使って商品候補を推定する。
+
+```text
+MediaPipe Face Landmarker
+        ↓
+左右の目ランドマーク
+        ↓
+目元 ROI
+        ↓
+Landmark Affine + ECC
+        ↓
+Evidence Map
+暗化 60% + 色差 15% + エッジ差 25%
+        ×
+Eye Prior
+        ↓
+Probability Map
+        ↓
+Trimap
+        ↓
+Closed-form Alpha Matting
+        ↓
+Product RGBA
+        ↓
+AI加工済み画像へ相似変換 + Alpha Blend
+```
+
+未装着画像がない場合は、局所暗部を Evidence とするフォールバック経路を使う。
+
+![入力画像から顔ランドマークで trimap を生成し、まつ毛を抽出する](images/static-1-input-trimap-extract.png)
+
+![抽出したまつ毛を AI 加工画像へフィッティングして再合成する](images/static-2-fitting-recompose.png)
+
+![再合成前後の比較画像](images/static-3-comparison.png)
+
+詳細: [docs/static-image-algorithm.md](docs/static-image-algorithm.md)
+
+### 動画モードの処理
+
+動画では、まつ毛だけを毎フレーム抽出しない。フレームごとの Alpha 推定はちらつきや、まばたき時の誤差を起こしやすいため、元動画の **目元領域（まつ毛・まぶた・目・まばたきの動き）をそのまま再利用**する。
+
+```text
+元動画
+  ↓
+フレーム分解 + 全フレーム顔ランドマーク
+  ↓
+ベストフレーム選択
+sharpness 50% + eye openness 50%
+  ↓
+ベストフレームを外部生成AIで人物加工
+  ↓
+各フレーム:
+  AI加工画像を Landmark Affine で
+  元フレームの顔位置へ warp
+  ↓
+元フレームの目元 Soft Mask を上から貼り戻す
+  ↓
+H.264 / yuv420p で MP4 出力
+```
+
+動画側では、商品を含む元目元領域には幾何変換を掛けない。変形するのは AI 加工済み画像側だけである。
+
+詳細: [docs/video-algorithm.md](docs/video-algorithm.md)
+
+### Generative Product Preserve の意味
+
+本プロジェクトで保証しようとしているのは、**商品を生成AIに描き直させないこと**である。
+
+「AIを使っていない」「元画像とピクセル単位で完全一致する」という意味ではない。
+
+- MediaPipe Face Landmarker は機械学習モデル
+- 静止画は Matting の Foreground 推定と補間を通る
+- 動画は境界 feather と H.264 再エンコードを通る
+- 静止画の再合成では相似変換による補間が入る
+- 動画では元の目元コア領域を無変形で使うが、最終 MP4 では圧縮劣化がある
+
+そのため、「生成AIに商品を再生成させず、実物画像由来の商品外観を可能な限り保持して再利用する」という意味での保持を目標とする。
 
 ## PoC の範囲 (Phase 1–2)
 
@@ -328,15 +486,28 @@ python scripts/run_evaluation.py --output evaluation-results      # 実行 → r
 目的・指標の定義・**合成データの限界**は [evaluation/README.md](evaluation/README.md)、
 現行mainの実測結果と見つかった問題は [docs/benchmark-findings.md](docs/benchmark-findings.md)。
 
-## ドキュメント
+## 技術ドキュメント
 
-- [docs/handover.md](docs/handover.md) — 引き継ぎメモ（採用/却下した方式とその理由、既知の落とし穴、未検証事項）
-- [evaluation/README.md](evaluation/README.md) — Synthetic Benchmark（目的・生成方法・指標定義・限界）
-- [docs/benchmark-findings.md](docs/benchmark-findings.md) — Benchmarkで分かった現行アルゴリズムの課題と優先順位
+アルゴリズム・設計:
+
+- [docs/design-philosophy.md](docs/design-philosophy.md) — 設計思想（なぜ商品を生成AIに任せないのか、商品領域に許す操作、保持の限界）
+- [docs/static-image-algorithm.md](docs/static-image-algorithm.md) — 静止画モードの全処理（対象物としての難しさ / ROI / Evidence / Trimap / Alpha Matting / 再合成 / コード対応表）
+- [docs/video-algorithm.md](docs/video-algorithm.md) — 動画モードの全処理（ベストフレーム選択 / 目元 Soft Mask / AI 画像の位置合わせ / 合成 / 不採用方式 / コード対応表）
+- [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）と却下案
+- [docs/video-expression-matting.md](docs/video-expression-matting.md) — 表情変化が大きい動画への発展案
 - [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
-- [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）
+
+品質評価:
+
+- [evaluation/README.md](evaluation/README.md) — Synthetic Benchmark（目的・生成方法・指標定義・限界・数値の読み方）
+- [docs/benchmark-findings.md](docs/benchmark-findings.md) — Benchmarkで分かった現行アルゴリズムの課題と優先順位
+
+実装・運用・開発体制:
+
+- [docs/supabase-phase-b.md](docs/supabase-phase-b.md) — カタログ / 形状類似検索 / Matting ジョブ進捗の Supabase 連携
 - [docs/session-provenance.md](docs/session-provenance.md) — 元画像 / 合成元 / 合成結果と実行履歴のローカル保存
 - [docs/devin-supabase-usage.md](docs/devin-supabase-usage.md) — Devin をどう使って開発したか（git 履歴ベース）と Supabase の用途まとめ
+- [docs/handover.md](docs/handover.md) — 引き継ぎメモ（採用/却下した方式とその理由、既知の落とし穴、未検証事項）
 
 ## 起動
 
