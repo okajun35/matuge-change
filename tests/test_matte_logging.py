@@ -72,8 +72,31 @@ class TestStartupLog:
         assert "max_solve_pixels=60000" in caplog.text
         assert "max_workers=1" in caplog.text
 
+    def test_it_logs_the_face_detection_size_limit(self, monkeypatch, caplog):
+        monkeypatch.setenv("MATTE_DETECT_MAX_SIDE", "1200")
+
+        with caplog.at_level(logging.INFO):
+            observability.log_matte_settings()
+
+        assert "detect_max_side=1200" in caplog.text
+
+    def test_a_misconfigured_detection_size_is_reported_at_startup(self, monkeypatch, caplog):
+        # リクエスト時に 400 を返すだけだと、タイポなのか画像の問題なのか分からない
+        monkeypatch.setenv("MATTE_DETECT_MAX_SIDE", "1600px")
+
+        with caplog.at_level(logging.INFO):
+            observability.log_matte_settings()
+
+        assert "MATTE_DETECT_MAX_SIDE" in caplog.text
+        assert caplog.records[-1].levelno >= logging.ERROR
+
     def test_it_says_the_defaults_are_defaults_when_nothing_is_configured(self, monkeypatch, caplog):
-        for name in ("MATTE_SOLVE_MODE", "MATTE_MAX_SOLVE_PIXELS", "MATTE_MAX_WORKERS"):
+        for name in (
+            "MATTE_SOLVE_MODE",
+            "MATTE_MAX_SOLVE_PIXELS",
+            "MATTE_MAX_WORKERS",
+            "MATTE_DETECT_MAX_SIDE",
+        ):
             monkeypatch.delenv(name, raising=False)
 
         with caplog.at_level(logging.INFO):

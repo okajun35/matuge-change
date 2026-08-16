@@ -83,6 +83,24 @@ class TestAlignIntoWindow:
         assert windowed.shape == full.shape
         assert np.array_equal(windowed, full)
 
+    def test_matches_full_warp_then_crop_under_rotation_and_scale(self, synthetic_landmarks):
+        # estimateAffinePartial2D は回転・等倍拡縮も返すので、平行移動だけでは
+        # ROI オフセットの畳み込みミスを検出できない。ずれがあれば数十階調の差になる
+        rng = np.random.default_rng(13)
+        img_a = rng.integers(0, 256, size=(400, 400, 3), dtype=np.uint8)
+        matrix = cv2.getRotationMatrix2D((200.0, 200.0), 7.0, 1.15)
+        img_b = cv2.warpAffine(img_a, matrix, (400, 400), borderMode=cv2.BORDER_REPLICATE)
+        lms_b = cv2.transform(synthetic_landmarks.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+        roi = EyeRoi(37, 51, 337, 291, 1.0)
+
+        full = roi_module.crop_roi(alignment.align_b_to_a(img_a, synthetic_landmarks, img_b, lms_b), roi)
+        windowed = alignment.align_b_into_roi(img_b, lms_b, synthetic_landmarks, roi)
+        assert windowed.shape == full.shape
+        # warpAffine は逆写像を固定小数点で持つので、平行移動以外では最下位1階調だけ揺れる
+        diff = np.abs(windowed.astype(np.int16) - full.astype(np.int16))
+        assert diff.max() <= 1
+        assert (diff > 0).mean() < 0.01
+
     def test_matches_full_warp_then_crop_when_downscaled(self, synthetic_landmarks):
         rng = np.random.default_rng(12)
         img_a = rng.integers(0, 256, size=(400, 400, 3), dtype=np.uint8)
@@ -199,3 +217,59 @@ class TestLazyDecode:
         with pytest.raises(FaceNotDetected):
             service.create_lazily(lambda: face_image, lambda: face_image.copy())
         assert set(os.listdir(service.store.root)) == before
+
+
+class TestFailedCreateReleasesMemory:
+    """失敗したリクエストが 12MP 分の arena を抱えたまま次に持ち越さない。"""
+
+    def test_worn_image_is_released_when_no_face_is_detected(self, tmp_path, monkeypatch, face_image):
+        monkeypatch.setattr(service_module, "detect_landmarks", lambda img: None)
+        alive: dict[str, weakref.ref] = {}
+        released: list[bool] = []
+        monkeypatch.setattr(
+            service_module,
+            "release_memory",
+            lambda: released.append(alive["a"]() is None),
+        )
+        service = SessionService(SessionStore(str(tmp_path)))
+
+        def load_a():
+            img = face_image.copy()
+            alive["a"] = weakref.ref(img)
+            return img
+
+        with pytest.raises(FaceNotDetected):
+            service.create_lazily(load_a, None)
+
+        gc.collect()
+        assert released, "a failed create must still trim the heap"
+        assert released[-1], "the decoded source must be dropped before trimming"
+
+    def test_bare_image_is_released_when_analysis_fails(
+        self, tmp_path, monkeypatch, face_image, synthetic_landmarks
+    ):
+        monkeypatch.setattr(service_module, "detect_landmarks", lambda img: synthetic_landmarks)
+        monkeypatch.setattr(
+            service_module,
+            "difference_map",
+            lambda a, b: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        alive: dict[str, weakref.ref] = {}
+        released: list[bool] = []
+        monkeypatch.setattr(
+            service_module,
+            "release_memory",
+            lambda: released.append(alive.get("b") is not None and alive["b"]() is None),
+        )
+        service = SessionService(SessionStore(str(tmp_path)))
+
+        def load_b():
+            img = face_image.copy()
+            alive["b"] = weakref.ref(img)
+            return img
+
+        with pytest.raises(RuntimeError):
+            service.create_lazily(lambda: face_image.copy(), load_b)
+
+        gc.collect()
+        assert released[-1], "the bare source must be dropped before the final trim"

@@ -71,22 +71,24 @@ class SessionService:
         are ~36MB each as arrays, and holding both plus a full-size aligned copy
         is what pushes small hosts (512MB) over the limit.
         """
-        img_a = load_a()
-        # a crash during analysis is usually about the source size, so log it before detection
-        logger.info("session create: worn image %dx%d", img_a.shape[1], img_a.shape[0])
-        lms_a = detect_landmarks(img_a)
-        if roi_rect is None and lms_a is None:
-            raise FaceNotDetected("no face detected in the worn image")
-
-        manual = roi_rect is not None
-        roi = manual_eye_roi(roi_rect, img_a.shape) if manual else compute_eye_roi(lms_a, img_a.shape)
-        roi_a = crop_roi(img_a, roi)
-
-        session_id = self.store.create()
+        session_id: str | None = None
+        img_a = img_b = None
         try:
+            img_a = load_a()
+            # a crash during analysis is usually about the source size, so log it before detection
+            logger.info("session create: worn image %dx%d", img_a.shape[1], img_a.shape[0])
+            lms_a = detect_landmarks(img_a)
+            if roi_rect is None and lms_a is None:
+                raise FaceNotDetected("no face detected in the worn image")
+
+            manual = roi_rect is not None
+            roi = manual_eye_roi(roi_rect, img_a.shape) if manual else compute_eye_roi(lms_a, img_a.shape)
+            roi_a = crop_roi(img_a, roi)
+
+            session_id = self.store.create()
             # the uploads themselves are kept so a session can be re-derived later
             self.store.save_image(session_id, "source_with", img_a)
-            del img_a
+            img_a = None
             release_memory()
 
             roi_b = None
@@ -101,7 +103,7 @@ class SessionService:
                     if lms_a is None or lms_b is None
                     else align_b_into_roi(img_b, lms_b, lms_a, roi)
                 )
-                del img_b
+                img_b = None
                 release_memory()
                 roi_b = ecc_refine(roi_a, aligned_roi)
                 evidence = difference_map(roi_a, roi_b)
@@ -130,9 +132,13 @@ class SessionService:
                 load_b is not None,
             )
         except Exception:
-            self.store.discard(session_id)
+            if session_id is not None:
+                self.store.discard(session_id)
             raise
         finally:
+            # a failed request must not leave a 12MP arena behind for the next one: the
+            # raised exception keeps this frame alive, so the sources are dropped by hand
+            img_a = img_b = None
             release_memory()
 
     def _persist_created(

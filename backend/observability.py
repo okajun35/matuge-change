@@ -12,6 +12,7 @@ import os
 import sys
 
 from backend.jobs.gate import DEFAULT_MAX_WORKERS, max_workers
+from backend.lash_extraction.landmarks import DEFAULT_DETECT_MAX_SIDE, detect_max_side
 from backend.lash_extraction.matting import solve_settings
 
 logger = logging.getLogger("backend.matte")
@@ -51,14 +52,21 @@ def log_matte_settings() -> None:
     try:
         mode, budget = solve_settings()
         workers = max_workers()
+        detect_side = detect_max_side()
     except ValueError as exc:
         logger.error("matte settings are misconfigured: %s", exc)
         return
-    defaults = mode == "full" and budget is None and workers == DEFAULT_MAX_WORKERS
+    defaults = (
+        mode == "full"
+        and budget is None
+        and workers == DEFAULT_MAX_WORKERS
+        and detect_side == DEFAULT_DETECT_MAX_SIDE
+    )
     logger.info(
-        "matte settings: solve_mode=%s max_solve_pixels=%s max_workers=%d%s",
+        "matte settings: solve_mode=%s max_solve_pixels=%s max_workers=%d detect_max_side=%s%s",
         mode,
         _describe(budget),
         workers,
+        _describe(detect_side),
         " (all default; set MATTE_SOLVE_MODE=tiled on 512MB hosts)" if defaults else "",
     )
