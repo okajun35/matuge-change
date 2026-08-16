@@ -160,6 +160,13 @@ tiled と full の差（**C層**: 合成ケースの回帰比較。実写精度�
 上限を無視していた頃の 0.042 より広がった）。メモリに余裕があるなら `full` を使う。生成物がどちらの
 モードかは実行履歴の `solve_mode` / `max_solve_pixels` で追跡できる。
 
+デプロイ先で実際にどのモードが効いているかは stdout のログで確認する（`backend/observability.py`。
+uvicorn は root logger にハンドラを付けないので、`backend` logger に自前で stdout ハンドラを付けている）:
+起動時の `matte settings: ...` 1行、実行ごとの `matte run: ... max_solve_px=... elapsed_ms=...`、
+ゲート待ちの `matte waiting for a matting slot: ...`。`max_solve_px` が budget を超えていたら
+tiled の上限が破れている（過去のブロッカーの再発検知）。レベルは `MATTE_LOG_LEVEL`（既定 INFO）。
+設定値が不正な場合は起動を落とさず `ERROR` を1行出す（トレースバックに typo が埋もれるのを避ける）。
+
 ## 7. 未検証・今後の課題
 
 - 手動ROIモードの実写検証（横顔画像でのAlpha品質）

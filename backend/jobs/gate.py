@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections.abc import Iterator
@@ -10,6 +11,8 @@ from contextlib import contextmanager
 from backend.jobs.memory import release_memory
 
 DEFAULT_MAX_WORKERS = 1
+
+logger = logging.getLogger("backend.matte")
 
 
 def max_workers() -> int:
@@ -63,8 +66,13 @@ def matte_slot() -> Iterator[None]:
     queued job and a synchronous request peak at the same time and the 512MB host dies
     before either of them reaches its cleanup.
     """
-    semaphore = _state.semaphore(max_workers())
-    semaphore.acquire()
+    limit = max_workers()
+    semaphore = _state.semaphore(limit)
+    if not semaphore.acquire(blocking=False):
+        # The wait is the usual explanation for a matting that looks hung with the default
+        # limit of one, so it is logged rather than left invisible.
+        logger.info("matte waiting for a matting slot: active=%d max_workers=%d", _state.active, limit)
+        semaphore.acquire()
     _state.enter()
     try:
         yield

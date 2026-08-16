@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 
 import cv2
 import numpy as np
@@ -23,6 +25,10 @@ SOLVE_MODES = (FULL, TILED)
 SOLVE_MARGIN_PX = 32
 TILE_OVERLAP_PX = 24
 DEFAULT_MAX_SOLVE_PIXELS = 60_000
+
+# Shared with `backend.observability` so the startup line and the per-run lines read as one
+# stream: `MATTE_SOLVE_MODE` decides whether a host survives, so it has to be greppable.
+logger = logging.getLogger("backend.matte")
 
 
 def solve_mode() -> str:
@@ -259,8 +265,13 @@ def _solve_tiles(
     alpha: np.ndarray,
     fg_bgr: np.ndarray,
     budget: int | None,
-) -> None:
-    """Fill `alpha` / `fg_bgr` in place, one bounded tile of the window at a time."""
+) -> list[int]:
+    """Fill `alpha` / `fg_bgr` in place, one bounded tile of the window at a time.
+
+    Returns the area of every solve it ran, which is what the per-run log reports: a solve
+    larger than the budget is the regression this mode has to be watched for.
+    """
+    solved: list[int] = []
     h, w = trimap.shape[:2]
     for written in tiles(h, w, budget):
         for (y0, y1, x0, x1), (cy0, cy1, cx0, cx1) in _bounded_tiles(trimap, written, budget):
@@ -268,9 +279,11 @@ def _solve_tiles(
                 np.ascontiguousarray(roi[cy0:cy1, cx0:cx1]),
                 np.ascontiguousarray(trimap[cy0:cy1, cx0:cx1]),
             )
+            solved.append((cy1 - cy0) * (cx1 - cx0))
             sy, sx = y0 - cy0, x0 - cx0
             alpha[y0:y1, x0:x1] = tile_alpha[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
             fg_bgr[y0:y1, x0:x1] = tile_fg[sy : sy + (y1 - y0), sx : sx + (x1 - x0)]
+    return solved
 
 
 def _is_solvable(trimap: np.ndarray) -> bool:
@@ -296,24 +309,43 @@ def run_matting(
 
     Degenerate trimaps - nothing unknown, or missing a label to propagate from - are
     answered from the trimap in both modes; pymatting raises on them.
+
+    Each run logs the mode it used and the size of the largest solve, so an operator can
+    confirm per click which path a deployment took.
     """
     if mode not in SOLVE_MODES:
         raise ValueError(f"solve mode must be one of {SOLVE_MODES}, got {mode!r}")
-    if not _is_solvable(trimap):
-        return np.where(trimap == 255, 1.0, 0.0), roi_a.astype(np.float64) / 255.0
-    if mode == FULL:
-        return _closed_form(roi_a, trimap)
-    alpha = np.where(trimap == 255, 1.0, 0.0)
-    fg_bgr = roi_a.astype(np.float64) / 255.0
-    y0, y1, x0, x1 = solve_window(trimap)
-    _solve_tiles(
-        roi_a[y0:y1, x0:x1],
-        trimap[y0:y1, x0:x1],
-        alpha[y0:y1, x0:x1],
-        fg_bgr[y0:y1, x0:x1],
-        max_solve_pixels or None,
-    )
-    return alpha, fg_bgr
+    started = time.perf_counter()
+    solved: list[int] = []
+    h, w = trimap.shape[:2]
+    try:
+        if not _is_solvable(trimap):
+            return np.where(trimap == 255, 1.0, 0.0), roi_a.astype(np.float64) / 255.0
+        if mode == FULL:
+            solved = [h * w]
+            return _closed_form(roi_a, trimap)
+        alpha = np.where(trimap == 255, 1.0, 0.0)
+        fg_bgr = roi_a.astype(np.float64) / 255.0
+        y0, y1, x0, x1 = solve_window(trimap)
+        solved = _solve_tiles(
+            roi_a[y0:y1, x0:x1],
+            trimap[y0:y1, x0:x1],
+            alpha[y0:y1, x0:x1],
+            fg_bgr[y0:y1, x0:x1],
+            max_solve_pixels or None,
+        )
+        return alpha, fg_bgr
+    finally:
+        logger.info(
+            "matte run: solve_mode=%s roi=%dx%d max_solve_pixels=%s solves=%d max_solve_px=%d elapsed_ms=%d",
+            mode,
+            w,
+            h,
+            max_solve_pixels or "none",
+            len(solved),
+            max(solved, default=0),
+            (time.perf_counter() - started) * 1000,
+        )
 
 
 def composite(alpha: np.ndarray, fg_bgr: np.ndarray, base_bgr: np.ndarray) -> np.ndarray:
