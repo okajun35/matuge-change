@@ -171,6 +171,39 @@ uvicorn は root logger にハンドラを付けないので、`backend` logger 
 tiled の上限が破れている（過去のブロッカーの再発検知）。レベルは `MATTE_LOG_LEVEL`（既定 INFO）。
 設定値が不正な場合は起動を落とさず `ERROR` を1行出す（トレースバックに typo が埋もれるのを避ける）。
 
+## 6.7 解析開始（POST /api/session）のメモリ — スマホ実写で 512MB を超える
+
+Matting の設定（6.6）は solve 側だけを守るので、**解析開始そのもの**が落ちるケースは別問題。
+ユーザー提供のスマホ実写2枚（4000x3000 = 12MP、JPEG 2.5MB）で `POST /api/session` の
+ピークRSSは **545MB**（対策前）だった。512MB ホストではここで OOM → 502 になる。
+内訳は 12MP 画像2枚のデコード（36MB/枚）＋ MediaPipe に 12MP を渡した分の常駐（約100MB）＋
+元画像と同サイズの aligned コピー（36MB）＋ ROI crop が view のまま元画像を掴んでいた分。
+
+対策（出力を壊さない範囲で、ピーク **420MB**）:
+
+- `detect_landmarks()` は長辺 `DEFAULT_DETECT_MAX_SIDE=1600` に縮小してから MediaPipe に渡し、
+  正規化座標を元画像ピクセルへ戻す。MediaPipe は内部でモデル入力サイズまで縮小するので
+  巨大入力は精度に寄与しない（12MP を渡すのは RGB コピーと内部バッファの無駄）。
+  ROI は landmark 由来なので数px変わる（実写で 1100x577 → 1100x566）。ビット一致ではない。
+  `MATTE_DETECT_MAX_SIDE=0` で縮小を切れる（＝従来どおり元解像度で検出）。抽出する画素自体は
+  常に元画像のフル解像度から切るので、この設定は解像度・品質のトレードオフではない。
+  他の MATTE_* と同様に起動ログ（`matte settings: ... detect_max_side=...`）に出し、
+  誤設定は起動時に ERROR にする（リクエスト時の 400 だけだとタイポと画像の問題が区別できない）
+- `align_b_into_roi()` は ROI オフセットを affine に畳み込み、**ROI 窓だけ** warp する。
+  全画面 warp を作らない。`crop_roi(align_b_to_a(...), roi)` と平行移動ではビット一致し、
+  回転・拡縮が入ると最下位1階調だけ揺れる（`warpAffine` が逆写像を固定小数点で持つため。
+  実測で差>0が0.04%・最大1）。畳み込みミスなら数十階調の差になるのでテストで検出できる
+- `crop_roi()` は view ではなくコピーを返す。view は元画像全体（12MPで36MB）を解放できなくする
+- `SessionService.create_lazily(load_a, load_b, ...)` は**1枚ずつデコード**する。装着画像を保存して
+  解放してから未装着画像を読む。ルータは `decode_upload()` で圧縮バイト列のまま受け渡す。
+  従来の `create(img_a, img_b, ...)`（配列を渡すAPI）はそのまま残っている
+- 失敗時は `store.discard()` で作りかけのセッションディレクトリを消す（未装着画像で顔検出が
+  失敗した場合に空セッションを残さない）。`try` はデコード前から始め、`finally` で
+  `img_a`/`img_b` を明示的に手放してから `release_memory()` する（例外が frame を掴むので
+  ローカル変数のままだと 12MP 分の arena が次のリクエストに持ち越される）
+- `session create: worn image WxH` / `session create: roi WxH scale=... mode=...` を INFO で出す。
+  次に落ちたときログだけで入力サイズが分かる（ログが MediaPipe 初期化直後で切れていたのが手掛かりだった）
+
 ## 7. 未検証・今後の課題
 
 - 手動ROIモードの実写検証（横顔画像でのAlpha品質）

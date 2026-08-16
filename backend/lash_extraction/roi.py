@@ -54,8 +54,15 @@ def manual_eye_roi(rect: tuple[float, float, float, float], img_shape: tuple) ->
     return EyeRoi(x0, y0, x1, y1, scale)
 
 
+def scale_crop(crop: np.ndarray, scale: float) -> np.ndarray:
+    if scale >= 1.0:
+        return crop
+    return cv2.resize(crop, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+
 def crop_roi(img: np.ndarray, roi: EyeRoi) -> np.ndarray:
     crop = img[roi.y0 : roi.y1, roi.x0 : roi.x1]
     if roi.scale < 1.0:
-        crop = cv2.resize(crop, None, fx=roi.scale, fy=roi.scale, interpolation=cv2.INTER_AREA)
-    return crop
+        return scale_crop(crop, roi.scale)
+    # a view would keep the whole source image alive (~36MB for a phone photo)
+    return crop.copy()

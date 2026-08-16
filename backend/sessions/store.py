@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import uuid
 from typing import Any
 
@@ -22,6 +23,10 @@ class SessionStore:
         session_id = uuid.uuid4().hex[:12]
         os.makedirs(os.path.join(self.root, session_id))
         return session_id
+
+    def discard(self, session_id: str) -> None:
+        """Remove a session directory that was never completed."""
+        shutil.rmtree(os.path.join(self.root, session_id), ignore_errors=True)
 
     def path(self, session_id: str, *parts: str) -> str:
         return os.path.join(self.root, session_id, *parts)

@@ -1,6 +1,6 @@
 """Lash extraction domain: landmarks, ROI, alignment, evidence, matting."""
 
-from backend.lash_extraction.alignment import align_b_to_a, ecc_refine
+from backend.lash_extraction.alignment import align_b_into_roi, align_b_to_a, ecc_refine
 from backend.lash_extraction.evidence import (
     darkness_map,
     difference_map,
@@ -30,6 +30,7 @@ from backend.lash_extraction.roi import (
     compute_eye_roi,
     crop_roi,
     manual_eye_roi,
+    scale_crop,
 )
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "MIN_ROI_SIDE",
     "RIGHT_EYE",
     "EyeRoi",
+    "align_b_into_roi",
     "align_b_to_a",
     "build_trimap",
     "composite",
@@ -56,5 +58,6 @@ __all__ = [
     "recompose_onto",
     "reconstruction_error",
     "run_matting",
+    "scale_crop",
     "solve_settings",
 ]
