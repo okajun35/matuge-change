@@ -204,6 +204,35 @@ Matting の設定（6.6）は solve 側だけを守るので、**解析開始そ
 - `session create: worn image WxH` / `session create: roi WxH scale=... mode=...` を INFO で出す。
   次に落ちたときログだけで入力サイズが分かる（ログが MediaPipe 初期化直後で切れていたのが手掛かりだった）
 
+## 6.8 Docker イメージでの常駐 575MB — numba の初回JITコンパイル
+
+6.7 の対策後も Render（512MB）で解析開始が落ちた。**venv での計測（ピーク421MB）では見えず、
+本番 Dockerfile を `--memory=512m` で走らせて初めて再現する**問題だった（`oom=true exit=137`、
+ログはユーザー報告と同じ `inference_feedback_manager` の行で切れる）。
+
+原因は `pymatting` の import。numba が JIT コンパイルするため **初回 import だけで 27秒・RSS 490MB**
+使い、glibc はそのヒープをOSに返さないので、リクエストを1件も受けていない起動直後の常駐が
+**RSS 575MB（heap 296MB）** になる。`malloc_trim` でも `MALLOC_ARENA_MAX=2` でも減らない。
+コンパイル結果は `site-packages/pymatting/**/*.nbi|*.nbc`（58ファイル）にキャッシュされるので、
+**キャッシュがある2回目以降の import は heap 55MB**、常駐 272MB に収まる。
+
+対策は Dockerfile のビルド時に `RUN python -c "import pymatting"` を1行入れて
+キャッシュをイメージに焼くこと（`COPY backend` より前＝アプリ変更でこのレイヤーを壊さない位置）。
+`--memory=512m` での実測: 起動直後 575MB → **273MB**、実写2枚の `POST /api/session` 完了時 372MB、
+続けて `POST /api/matte` も 200（360MB）。
+
+注意点:
+
+- ローカルの venv では numba キャッシュが既に温まっているので、この問題は**再現しない**。
+  Render のメモリ問題を追うときは `docker run --memory=512m` で本番イメージを使う
+- `Dockerfile.dev` は `NUMBA_CACHE_DIR=/tmp/numba` を持つので同じ温めは不要（テスト実行用）
+- ビルド時間は初回 +30秒ほど増える（レイヤーキャッシュが効くので通常のデプロイでは増えない）
+- **キャッシュキーは対象CPU名を含む**ので、温めの前に `NUMBA_CPU_NAME=generic` /
+  `NUMBA_CPU_FEATURES=""` を ENV で固定している。これが無いとビルドホストのCPU向けに
+  焼かれ、CPUの違う Render では無視されて起動時に再コンパイル（実測 24秒・453MB）＝OOMに戻る。
+  ENV はイメージに残るのでビルド時と実行時が同じターゲットを選ぶ。固定した状態での実測は
+  import 0.4秒・177MB、`--memory=512m` で起動直後 263MB、実写2枚の session/matte とも 200（349MB）
+
 ## 7. 未検証・今後の課題
 
 - 手動ROIモードの実写検証（横顔画像でのAlpha品質）

@@ -28,6 +28,28 @@ class TestDockerfile:
         assert "requirements.txt" in text
         assert "face_landmarker.task" in text
 
+    def test_warms_the_numba_cache_at_build_time(self):
+        # pymatting の numba 関数を初回importでJITコンパイルすると 490MB 使い、glibcは
+        # そのヒープをOSに返さないので 512MB ホストでは解析リクエストがOOMする。
+        # ビルド時にコンパイルしてキャッシュをイメージへ焼く（起動時は読むだけ）。
+        lines = [line.strip() for line in _read("Dockerfile").splitlines()]
+        warm = lines.index('RUN python -c "import pymatting"')
+        # 依存を入れる前には import できず、アプリのCOPYより後だとコード変更のたびに
+        # このレイヤーが作り直される（＝毎デプロイでビルドが30秒延びる）
+        install = next(i for i, line in enumerate(lines) if "pip install" in line)
+        copy_app = next(i for i, line in enumerate(lines) if line.startswith("COPY backend"))
+        assert install < warm < copy_app
+
+    def test_pins_the_numba_target_cpu_for_build_and_runtime(self):
+        # numba のキャッシュキーは対象CPU名を含むので、ビルドホストと Render の CPU が
+        # 違うとキャッシュは無視され、起動時に 490MB の JIT が走って元の OOM に戻る
+        # （実測: 焼いたイメージを NUMBA_CPU_NAME=generic で動かすと 24秒・453MB）。
+        lines = [line.strip() for line in _read("Dockerfile").splitlines()]
+        pin = lines.index("ENV NUMBA_CPU_NAME=generic \\")
+        assert 'NUMBA_CPU_FEATURES=""' in lines[pin + 1]
+        # ENV はイメージに残るので、ビルド時と実行時が同じターゲットを選ぶ
+        assert pin < lines.index('RUN python -c "import pymatting"')
+
     def test_serves_the_app_on_configured_port(self):
         text = _read("Dockerfile")
         assert "backend.app:app" in text
