@@ -5,6 +5,11 @@
 まつ毛（商品＋商品に隠された/動かされた自まつ毛を含む「装着後の目元まつ毛外観」）を
 Alpha Matte として抽出し、後段の AI モデル加工画像へ再合成することを目標とする。
 
+## デモ動画
+
+つけまつげ着用動画から、AI モデルへ変更した完成画像までのデモ:
+https://www.youtube.com/watch?v=hN2X6LOEeXA
+
 ## プロジェクト概要
 
 ### 1. 作りたいもの
@@ -120,9 +125,21 @@ Amazonで商品を販売する場合、購入者は主に商品画像・動画�
 
 といった変化が起こる。
 
-![生成AIで人物を変更すると、まつ毛（商品）まで変わってしまう](images/problem-generative-ai-changes-product.png)
+![生成AIで人物を変更すると、まつ毛（商品）まで変わってしまう](img/problem-generative-ai-changes-product.png)
 
 見た目としては自然で美しい画像が生成されたとしても、そこに写っているつけまつげが、実際に販売している商品と異なるのであれば、ECの商品画像として使用することはできない。
+
+元の着用写真（実物のつけまつげを装着）:
+
+![元の着用写真](img/original-bustup.jpg)
+
+生成AIで人物をAIモデルへ変更した結果（着用しているつけまつげも別の形に変わってしまっている）:
+
+![生成AIで人物を変更した結果](img/ai-model-bustup.png)
+
+![つけまつげ着用画像の人物だけをAIで変更した結果（一番左：変更前／右3枚：AIによる人物変更後）](img/ai-change-comparison-1.png)
+
+![目元を拡大して比較](img/ai-change-comparison-2.png)
 
 #### ECでは「似ている商品」では不十分
 
@@ -166,9 +183,23 @@ ECの商品画像は、購入者が商品を選ぶための情報である。
 
 AIによって人物表現を変えるメリットを活用しながら、ECで最も重要な **「販売している商品そのものを正しく見せる」** ことを維持することが、このプロジェクトの中心テーマとなる。
 
+実際に Matsuge Change を用いて変更した結果:
+
+![Matsuge Change を用いて変更した結果（バストアップ画像1）](img/matsuge-change-bustup-1.png)
+
+![Matsuge Change を用いて変更した結果（バストアップ画像2）](img/matsuge-change-bustup-2.png)
+
+![Matsuge Change を用いて変更した結果（バストアップ画像3）](img/matsuge-change-bustup-3.png)
+
+![Matsuge Change を用いて変更した結果（目元画像1）](img/matsuge-change-eye-1.png)
+
+![Matsuge Change を用いて変更した結果（目元画像2）](img/matsuge-change-eye-2.png)
+
 ### 3. 今回の対象商品
 
 今回のハッカソンでは対象を広げず、**つけまつげ1種類**に絞って実装・検証します。
+
+対象商品（実際に Amazon で販売中）: https://www.amazon.co.jp/dp/B0GFJSHBWT
 
 実際にECで販売している商品を使用し、
 
@@ -178,7 +209,7 @@ AIによって人物表現を変えるメリットを活用しながら、ECで�
 
 を用いて検証します。
 
-![対象商品のつけまつ毛（毛足が長く、細い毛先が多数存在する）](images/product-eyelash-example.png)
+![対象商品のつけまつげ（実物）](img/shop-example.png)
 
 毛足が長く細い毛先が多数あるダンス・ステージ用途の商品で、画像処理としては難しい条件になる
 （詳細は [docs/static-image-algorithm.md](docs/static-image-algorithm.md)「対象物としての難しさ」）。
@@ -340,11 +371,11 @@ AI加工済み画像へ相似変換 + Alpha Blend
 
 未装着画像がない場合は、局所暗部を Evidence とするフォールバック経路を使う。
 
-![入力画像から顔ランドマークで trimap を生成し、まつ毛を抽出する](images/static-1-input-trimap-extract.png)
+![入力画像から顔ランドマークで trimap を生成し、まつ毛を抽出する](img/static-1-input-trimap-extract.png)
 
-![抽出したまつ毛を AI 加工画像へフィッティングして再合成する](images/static-2-fitting-recompose.png)
+![抽出したまつ毛を AI 加工画像へフィッティングして再合成する](img/static-2-fitting-recompose.png)
 
-![再合成前後の比較画像](images/static-3-comparison.png)
+![再合成前後の比較画像](img/static-3-comparison.png)
 
 詳細: [docs/static-image-algorithm.md](docs/static-image-algorithm.md)
 

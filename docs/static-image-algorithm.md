@@ -13,7 +13,7 @@ AI 加工済み画像へ再合成する現行アルゴリズムを説明する�
 
 今回の対象商品は、毛足が長く、細い毛先が多数存在するダンス・ステージ用途のつけまつ毛である。
 
-![対象商品のつけまつ毛（毛足が長く毛先が細い）](../images/product-eyelash-example.png)
+![対象商品のつけまつ毛（毛足が長く毛先が細い）](../img/shop-example.png)
 
 画像処理上は次の特徴がある。
 
@@ -61,11 +61,11 @@ AI 加工済み画像へ相似変換（Landmark Affine）+ Alpha Blend
 
 抽出の入口と出口は次のようになる。
 
-![入力画像から顔認証で trimap を生成し、まつ毛を抽出する](../images/static-1-input-trimap-extract.png)
+![入力画像から顔認証で trimap を生成し、まつ毛を抽出する](../img/static-1-input-trimap-extract.png)
 
-![抽出したまつ毛を AI 画像へフィッティングして再合成する](../images/static-2-fitting-recompose.png)
+![抽出したまつ毛を AI 画像へフィッティングして再合成する](../img/static-2-fitting-recompose.png)
 
-![再合成前後の比較画像](../images/static-3-comparison.png)
+![再合成前後の比較画像](../img/static-3-comparison.png)
 
 ## 2. 顔ランドマーク
 
