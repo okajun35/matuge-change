@@ -32,7 +32,7 @@ Alpha がフレーム間で揺れてちらつく問題について相談し、
 人間側で商品保持の要件・採用する設計・最終判断を行い、
 Devin が調査、説明、実装、テストを高速に反復する形で開発しました。
 
-詳細: [docs/devin-supabase-usage.md](docs/devin-supabase-usage.md)
+詳細: [devin-supabase-usage.md](./devin-supabase-usage.md)
 ### 全体像
 
 | 指標 | 値 | 取得元 |
