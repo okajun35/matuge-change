@@ -20,6 +20,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN curl -sL -o models/face_landmarker.task --create-dirs \
     https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 
+# pymatting の numba 関数はimport時にJITコンパイルされ、そこで一時的に ~490MB 使う。
+# glibc はそのヒープをOSへ返さないので、512MB ホストでは起動直後の常駐が ~575MB まで
+# 膨らみ、解析リクエストでOOM kill される（RSS 575MB → 273MB）。ここでコンパイルして
+# キャッシュ（site-packages 内の .nbi/.nbc）をイメージに焼き、起動時は読むだけにする。
+RUN python -c "import pymatting"
+
 COPY backend ./backend
 COPY frontend ./frontend
 

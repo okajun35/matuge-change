@@ -28,6 +28,15 @@ class TestDockerfile:
         assert "requirements.txt" in text
         assert "face_landmarker.task" in text
 
+    def test_warms_the_numba_cache_at_build_time(self):
+        text = _read("Dockerfile")
+        # pymatting の numba 関数を初回importでJITコンパイルすると 490MB 使い、glibcは
+        # そのヒープをOSに返さないので 512MB ホストでは解析リクエストがOOMする。
+        # ビルド時にコンパイルしてキャッシュをイメージへ焼く（起動時は読むだけ）。
+        assert "import pymatting" in text
+        # アプリのCOPYより前に温めないと、コード変更のたびにこのレイヤーが作り直される
+        assert text.index("import pymatting") < text.index("COPY backend")
+
     def test_serves_the_app_on_configured_port(self):
         text = _read("Dockerfile")
         assert "backend.app:app" in text
