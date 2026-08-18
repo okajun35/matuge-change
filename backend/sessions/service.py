@@ -214,6 +214,7 @@ class SessionService:
                 "angle": float(angle),
                 "flip": bool(flip),
                 "product_bbox": meta["product_bbox"],
+                "focus_rect": self._focus_rect(edited, out, normalized),
             }
         if not self.store.has_array(session_id, "landmarks"):
             raise FaceNotDetected(
@@ -225,7 +226,29 @@ class SessionService:
         if out is None:
             raise FaceNotDetected("no face detected in the edited image")
         self.store.save_image(session_id, "composite_on_edited", out)
-        return {"layers": ["composite_on_edited"]}
+        return {
+            "layers": ["composite_on_edited"],
+            "focus_rect": self._focus_rect(edited, out),
+        }
+
+    @staticmethod
+    def _focus_rect(
+        before: np.ndarray,
+        after: np.ndarray,
+        fallback: list[int] | None = None,
+    ) -> list[int]:
+        """Return a padded bounding box around pixels changed by recomposition."""
+        changed = np.any(before != after, axis=2)
+        h, w = changed.shape
+        if not changed.any():
+            return fallback or [0, 0, w, h]
+        ys, xs = np.where(changed)
+        x0, x1 = int(xs.min()), int(xs.max()) + 1
+        y0, y1 = int(ys.min()), int(ys.max()) + 1
+        # Show some surrounding skin and eye contour, not only a tight strip of lash pixels.
+        pad_x = max(24, (x1 - x0) // 3)
+        pad_y = max(24, (y1 - y0) // 2)
+        return [max(0, x0 - pad_x), max(0, y0 - pad_y), min(w, x1 + pad_x), min(h, y1 + pad_y)]
 
     @staticmethod
     def _recompose_into_rect(

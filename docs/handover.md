@@ -20,6 +20,7 @@
 | 機能 | 場所 | 備考 |
 | --- | --- | --- |
 | 静止画抽出（差分推定→Trimap→Matting→Product RGBA） | `backend/lash_extraction/`, `/extract.html` | 未装着画像なしでも暗部ベースで動く |
+| 静止画簡易モード（2画像→一括処理） | `/extract.html` | 既定UI。ドラッグ＆ドロップ、進捗モーダル、完成比較。仕様は `docs/static-image-simple-mode.md` |
 | 手動ROIモード（横顔・目のアップ） | `/api/session` の `roi_rect`, `/extract.html` | 顔検出とeye_priorをスキップ。下記 §8 |
 | 3値ブラシ（＋商品 / ？中間 / −背景） | `frontend/extract.html` | 中間は Trimap の Unknown=128 を強制 |
 | Undo/Redo | `frontend/extract.html` | DB不要。Canvasスナップショットをメモリに積むだけ |
@@ -66,6 +67,13 @@
 
 - ページは3つ: `/`（カタログ）、`/extract.html`（静止画）、`/video.html`（動画）。共通スタイルは `frontend/common.css`
   - 過去にハッシュルーティング案と別ページ案が競合し、**別ページ案を採用**（URL共有・ページ毎にJSが分離できる）
+- `/extract.html` は簡易モードが既定。装着画像とAI加工済み画像の2枚から、既存の
+  `/api/session` → `/api/matte/jobs` → `/api/recompose` を同じセッションで順番に呼ぶ。
+  別の処理系ではなく、失敗時や仕上がり調整時に同じセッションのまま現行の詳細UIを開く。
+  画面・エラー誘導・実装範囲は `docs/static-image-simple-mode.md` を参照
+- 簡易モードの完成表示は、再合成前後の画素差から返す `focus_rect` を中央に置き、最低100%で
+  表示する。フル解像度画像を自動フィットして5%前後に戻さない。比較後に完成画像へ戻る場合も
+  同じ倍率と中心へ戻す
 - `extract.html` のレイヤーは3種類あり、混同するとバグる:
   - サーバ側レイヤー（`roi_a` / `difference` / `probability` / `trimap` / `alpha` / `product_rgba` / `composite_*`）… 目元ROI解像度。ブラシ対象
   - `source_*` … アップロード済み元画像（フル解像度）。表示専用

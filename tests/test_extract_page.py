@@ -17,6 +17,80 @@ def _page() -> str:
         return f.read()
 
 
+class TestSimpleMode:
+    """初見利用者向けの一括処理が、詳細調整より先に提示されること。"""
+
+    def test_simple_mode_is_the_default_and_advanced_controls_are_collapsed(self):
+        page = _page()
+        assert 'id="simpleMode"' in page
+        assert 'id="advancedMode" hidden' in page
+        assert page.index('id="simpleMode"') < page.index('id="advancedMode"')
+
+    def test_two_required_image_drop_zones_use_the_existing_file_inputs(self):
+        page = _page()
+        for zone, input_id, label in (
+            ("dropWith", "fileWith", "装着画像"),
+            ("dropEdited", "fileEdited", "AI加工済み画像"),
+        ):
+            assert f'id="{zone}"' in page
+            assert f'for="{input_id}"' in page
+            assert f'id="{input_id}"' in page
+            assert label in page
+        assert 'id="simpleRun" disabled' in page
+
+    def test_drop_zones_accept_dropped_image_files_and_reject_other_files(self):
+        page = _page()
+        assert "dataTransfer.files" in page
+        assert "file.type.startsWith('image/')" in page
+        assert "このファイルは画像ではありません" in page
+        assert "dragover" in page and "drop" in page
+
+    def test_processing_modal_uses_plain_language_steps(self):
+        page = _page()
+        assert 'id="processModal"' in page
+        for step in (
+            "画像を確認しています",
+            "目元を検出しています",
+            "まつ毛を抽出しています",
+            "加工画像に合成しています",
+            "仕上がりを準備しています",
+        ):
+            assert step in page
+        assert "showModal()" in page
+
+    def test_simple_flow_reuses_the_three_existing_processing_steps_in_order(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        calls = [flow.index(name) for name in ("createSession()", "runMatting()", "recompose()")]
+        assert calls == sorted(calls)
+
+    def test_success_actions_compare_download_and_open_the_same_advanced_session(self):
+        page = _page()
+        for marker in ("simpleResult", "simpleCompare", "simpleDownload", "openAdvancedMode"):
+            assert marker in page
+        assert "composite_on_edited" in page
+        assert "source_edited" in page
+
+    def test_failure_offers_detailed_adjustment_without_discarding_the_session(self):
+        page = _page()
+        assert 'id="processOpenAdvanced"' in page
+        assert "詳細調整を開く" in page
+        assert "state.session = null" not in page
+
+    def test_completed_result_is_at_least_100_percent_and_centered_on_the_product(self):
+        page = _page()
+        assert "function focusSimpleResult(focusRect)" in page
+        assert "Math.max(1," in page
+        assert "stage.scrollLeft" in page and "stage.scrollTop" in page
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        assert "const recomposeResult = await recompose();" in flow
+        assert "focusSimpleResult(recomposeResult.focus_rect);" in flow
+
+
 class TestLocalPreview:
     def test_file_inputs_trigger_preview_before_analysis(self):
         page = _page()
