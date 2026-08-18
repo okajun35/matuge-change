@@ -140,6 +140,15 @@ class TestSimpleMode:
         assert flow.index("await recompose();") < flow.index("await openComparison();")
         assert "simpleResult.hidden = false;" not in flow
 
+    def test_completion_action_reasserts_comparison_instead_of_showing_the_result_view(self):
+        page = _page()
+        assert 'id="processClose" hidden>比較を表示</button>' in page
+        start = page.index("document.getElementById('processClose').onclick")
+        end = page.index("\n};", start)
+        handler = page[start:end]
+        assert "await openComparison();" in handler
+        assert "simpleResult.hidden = false" not in handler
+
     def test_comparison_can_download_the_full_resolution_ai_lash_result(self):
         page = _page()
         assert 'id="compareDownload"' in page

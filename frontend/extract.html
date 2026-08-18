@@ -301,7 +301,7 @@
   <div id="processActions">
     <button id="processRetry" class="secondary" hidden>もう一度実行</button>
     <button id="processOpenAdvanced" class="secondary" hidden>詳細調整を開く</button>
-    <button id="processClose" hidden>結果を確認</button>
+    <button id="processClose" hidden>比較を表示</button>
   </div>
 </dialog>
 
@@ -1447,13 +1447,14 @@ async function openComparison() {
   } catch (e) {
     status('比較画像の読み込みエラー: ' + e.message);
     openAdvancedMode();
-    return;
+    return false;
   }
   simpleResult.hidden = true;
   workspace.hidden = true;
   compareMode.hidden = false;
   drawComparison();
   compareMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
 }
 
 document.getElementById('compareZoomOut').onclick = () => {
@@ -1552,8 +1553,12 @@ document.getElementById('processRetry').onclick = () => {
   processModal.close();
   runSimpleFlow();
 };
-document.getElementById('processClose').onclick = () => {
+document.getElementById('processClose').onclick = async () => {
   processModal.close();
+  if (compareMode.hidden) {
+    const opened = await openComparison();
+    if (!opened) return;
+  }
   compareMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 document.getElementById('simpleCompare').onclick = openComparison;
