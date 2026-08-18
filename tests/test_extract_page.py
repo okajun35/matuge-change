@@ -17,6 +17,11 @@ def _page() -> str:
         return f.read()
 
 
+def _common_css() -> str:
+    with open(os.path.join(ROOT, "frontend", "common.css"), encoding="utf-8") as f:
+        return f.read()
+
+
 class TestSimpleMode:
     """初見利用者向けの一括処理が、詳細調整より先に提示されること。"""
 
@@ -155,6 +160,14 @@ class TestSimpleMode:
         assert 'download="matuge-ai-result.png"' in page
         assert ">結果を保存</a>" in page
         assert "compareDownload.href = `/api/image/${state.session}/composite_on_edited`;" in page
+
+    def test_result_download_uses_the_same_visual_style_as_buttons(self):
+        page = _page()
+        css = _common_css()
+        assert 'id="compareDownload" class="button-link"' in page
+        assert "button, .button-link" in css
+        assert ".button-link { display: inline-block; text-decoration: none; }" in css
+        assert ".button-link:focus-visible" in css
 
 
 class TestLocalPreview:
