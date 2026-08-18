@@ -50,6 +50,16 @@ class TestSimpleMode:
         assert "このファイルは画像ではありません" in page
         assert "dragover" in page and "drop" in page
 
+    def test_file_picker_rejects_non_images_before_registering_a_local_preview(self):
+        page = _page()
+        start = page.index("function registerLocalPreview(inputId, layer)")
+        end = page.index("\n}", start)
+        preview = page[start:end]
+        assert "file && !isImageFile(file)" in preview
+        assert preview.index("file && !isImageFile(file)") < preview.index("URL.createObjectURL(file)")
+        assert "e.target.value = '';" in preview
+        assert "filter(name => name !== layer)" in preview
+
     def test_processing_modal_uses_plain_language_steps(self):
         page = _page()
         assert 'id="processModal"' in page
@@ -70,6 +80,22 @@ class TestSimpleMode:
         flow = page[start:end]
         calls = [flow.index(name) for name in ("createSession()", "runMatting()", "recompose()")]
         assert calls == sorted(calls)
+
+    def test_simple_flow_restores_default_matting_thresholds_before_processing(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        reset = "control.value = control.defaultValue;"
+        assert reset in flow
+        assert flow.index(reset) < flow.index("createSession()")
+
+    def test_simple_flow_does_not_reload_the_result_already_loaded_by_recompose(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        assert "await showLayer('composite_on_edited');" not in flow
 
     def test_success_actions_compare_download_and_open_the_same_advanced_session(self):
         page = _page()

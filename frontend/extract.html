@@ -489,12 +489,25 @@ function showLayer(name) {
   });
 }
 
+const isImageFile = (file) => !!file && file.type.startsWith('image/');
+const invalidImageMessage = 'このファイルは画像ではありません。画像ファイルを選択してください。';
+
 // 解析を待たずに選択画像を確認できるよう、ファイル選択時点でプレビュー用レイヤーを足す
 function registerLocalPreview(inputId, layer) {
   document.getElementById(inputId).addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (state.localUrls[layer]) URL.revokeObjectURL(state.localUrls[layer]);
-    if (!file) { delete state.localUrls[layer]; return; }
+    delete state.localUrls[layer];
+    if (file && !isImageFile(file)) {
+      e.target.value = '';
+      const sel = document.getElementById('layerSelect');
+      const layers = [...sel.options].map(o => o.value).filter(name => name !== layer);
+      setLayerOptions(layers);
+      document.getElementById('simpleError').textContent = invalidImageMessage;
+      status(invalidImageMessage);
+      return;
+    }
+    if (!file) return;
     state.localUrls[layer] = URL.createObjectURL(file);
     const sel = document.getElementById('layerSelect');
     const layers = [...sel.options].map(o => o.value);
@@ -548,8 +561,8 @@ function setupDropZone({ zoneId, inputId, previewId, nameId, layer }) {
     e.preventDefault();
     zone.classList.remove('dragging');
     const file = e.dataTransfer.files[0];
-    if (!file || !file.type.startsWith('image/')) {
-      document.getElementById('simpleError').textContent = 'このファイルは画像ではありません。画像ファイルを選択してください。';
+    if (!isImageFile(file)) {
+      document.getElementById('simpleError').textContent = invalidImageMessage;
       return;
     }
     const transfer = new DataTransfer();
@@ -1502,6 +1515,10 @@ async function runSimpleFlow() {
   compareMode.hidden = true;
   simpleResult.hidden = true;
   document.getElementById('simpleError').textContent = '';
+  for (const id of ['fgThresh', 'bgThresh']) {
+    const control = document.getElementById(id);
+    control.value = control.defaultValue;
+  }
   roiModeSelect.value = 'auto';
   updateRoiHint();
   openProcessModal();
@@ -1515,7 +1532,6 @@ async function runSimpleFlow() {
     setSimpleStage(3);
     const recomposeResult = await recompose();
     setSimpleStage(4);
-    await showLayer('composite_on_edited');
     focusSimpleResult(recomposeResult.focus_rect);
     document.getElementById('simpleDownload').href = `/api/image/${state.session}/composite_on_edited`;
     await openComparison();

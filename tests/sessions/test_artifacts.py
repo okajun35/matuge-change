@@ -49,6 +49,17 @@ class TestSourcePersistence:
         assert service.store.has_layer(sid, "source_edited")
         assert service.store.has_layer(sid, "composite_on_edited")
 
+    def test_automatic_recompose_returns_a_bounded_focus_rect(self, service, face_image):
+        sid = service.create(face_image, None)["session_id"]
+        service.run_matte(sid, None)
+
+        result = service.recompose(sid, face_image)
+
+        x0, y0, x1, y1 = result["focus_rect"]
+        height, width = face_image.shape[:2]
+        assert 0 <= x0 < x1 <= width
+        assert 0 <= y0 < y1 <= height
+
 
 class TestRunHistory:
     def test_matting_appends_a_run(self, service, face_image):
