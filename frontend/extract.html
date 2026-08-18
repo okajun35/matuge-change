@@ -164,6 +164,7 @@
     <button id="compareZoomIn" class="secondary" aria-label="拡大">＋</button>
     <button id="compareFocus" class="secondary">まつ毛</button>
     <button id="compareFull" class="secondary">全体</button>
+    <a id="compareDownload" download="matuge-ai-result.png">結果を保存</a>
     <button id="compareClose">比較を閉じる</button>
   </div>
   <div class="compare-grid">
@@ -1363,6 +1364,7 @@ for (const button of document.querySelectorAll('[data-simple-layer]'))
 const COMPARE_ZOOM_STEP = 0.25;
 const compareResultCanvas = document.getElementById('compareResultCanvas');
 const compareOriginalCanvas = document.getElementById('compareOriginalCanvas');
+const compareDownload = document.getElementById('compareDownload');
 
 function aspectView(cx, cy, width, height, aspect) {
   let viewWidth = width;
@@ -1435,6 +1437,7 @@ function loadSessionImage(layer) {
 
 async function openComparison() {
   state.compareZoomLevel = 1;
+  compareDownload.href = `/api/image/${state.session}/composite_on_edited`;
   try {
     const [result, original] = await Promise.all([
       loadSessionImage('composite_on_edited'),
@@ -1518,16 +1521,15 @@ async function runSimpleFlow() {
     setSimpleStage(4);
     await showLayer('composite_on_edited');
     focusSimpleResult(recomposeResult.focus_rect);
+    document.getElementById('simpleDownload').href = `/api/image/${state.session}/composite_on_edited`;
+    await openComparison();
     for (const item of document.querySelectorAll('#processSteps li')) {
       item.classList.remove('active'); item.classList.add('done');
     }
     document.getElementById('processProgressBar').style.width = '100%';
     document.getElementById('processTitle').textContent = '処理が完了しました';
-    processMessage.textContent = '完成画像を表示しました。仕上がりを確認してください。';
+    processMessage.textContent = '比較モードを表示しました。左右の仕上がりを確認してください。';
     document.getElementById('processClose').hidden = false;
-    document.getElementById('simpleDownload').href = `/api/image/${state.session}/composite_on_edited`;
-    simpleResult.hidden = false;
-    workspace.hidden = false;
   } catch (e) {
     if (/no face detected in the worn image/.test(e.message) && !isManualRoi()) fallbackToManualRoi();
     if (/no face detected in the edited image/.test(e.message)) {
@@ -1552,7 +1554,7 @@ document.getElementById('processRetry').onclick = () => {
 };
 document.getElementById('processClose').onclick = () => {
   processModal.close();
-  simpleResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  compareMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 document.getElementById('simpleCompare').onclick = openComparison;
 document.getElementById('simpleRestart').onclick = () => {

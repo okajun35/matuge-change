@@ -131,6 +131,22 @@ class TestSimpleMode:
         assert "@media (max-width: 700px)" in page
         assert ".compare-grid { grid-template-columns: 1fr; }" in page
 
+    def test_success_opens_comparison_before_the_layer_result_view(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        assert "await openComparison();" in flow
+        assert flow.index("await recompose();") < flow.index("await openComparison();")
+        assert "simpleResult.hidden = false;" not in flow
+
+    def test_comparison_can_download_the_full_resolution_ai_lash_result(self):
+        page = _page()
+        assert 'id="compareDownload"' in page
+        assert 'download="matuge-ai-result.png"' in page
+        assert ">結果を保存</a>" in page
+        assert "compareDownload.href = `/api/image/${state.session}/composite_on_edited`;" in page
+
 
 class TestLocalPreview:
     def test_file_inputs_trigger_preview_before_analysis(self):
