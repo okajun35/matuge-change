@@ -89,6 +89,24 @@ class TestRecomposeWithoutLandmarks:
         assert abs((xs.min() + xs.max()) / 2 - 200) <= 2
         assert abs((ys.min() + ys.max()) / 2 - 160) <= 2
 
+    def test_recompose_returns_the_changed_product_area_for_result_focus(
+        self, profile_service, profile_image
+    ):
+        sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
+        product = np.zeros((20, 40, 4), np.uint8)
+        product[:, :, 2] = 255
+        product[:, :, 3] = 255
+        profile_service.store.save_image(sid, "product_rgba", product)
+        edited = np.zeros((300, 400, 3), np.uint8)
+
+        result = profile_service.recompose(sid, edited, dest_rect=(100, 80, 300, 240))
+
+        x0, y0, x1, y1 = result["focus_rect"]
+        assert 0 <= x0 < 200 < x1 <= edited.shape[1]
+        assert 0 <= y0 < 160 < y1 <= edited.shape[0]
+        assert x1 - x0 < edited.shape[1]
+        assert y1 - y0 < edited.shape[0]
+
     def test_angle_90_swaps_fitted_bbox_dimensions(self, profile_service, profile_image):
         sid = profile_service.create(profile_image, None, roi_rect=(60, 80, 260, 220))["session_id"]
         product = np.zeros((100, 100, 4), np.uint8)

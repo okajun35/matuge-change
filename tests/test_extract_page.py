@@ -17,6 +17,185 @@ def _page() -> str:
         return f.read()
 
 
+def _common_css() -> str:
+    with open(os.path.join(ROOT, "frontend", "common.css"), encoding="utf-8") as f:
+        return f.read()
+
+
+class TestSimpleMode:
+    """初見利用者向けの一括処理が、詳細調整より先に提示されること。"""
+
+    def test_simple_mode_is_the_default_and_advanced_controls_are_collapsed(self):
+        page = _page()
+        assert 'id="simpleMode"' in page
+        assert 'id="advancedMode" hidden' in page
+        assert page.index('id="simpleMode"') < page.index('id="advancedMode"')
+
+    def test_two_required_image_drop_zones_use_the_existing_file_inputs(self):
+        page = _page()
+        for zone, input_id, label in (
+            ("dropWith", "fileWith", "装着画像"),
+            ("dropEdited", "fileEdited", "AI加工済み画像"),
+        ):
+            assert f'id="{zone}"' in page
+            assert f'for="{input_id}"' in page
+            assert f'id="{input_id}"' in page
+            assert label in page
+        assert 'id="simpleRun" disabled' in page
+
+    def test_drop_zones_accept_dropped_image_files_and_reject_other_files(self):
+        page = _page()
+        assert "dataTransfer.files" in page
+        assert "file.type.startsWith('image/')" in page
+        assert "このファイルは画像ではありません" in page
+        assert "dragover" in page and "drop" in page
+
+    def test_file_picker_rejects_non_images_before_registering_a_local_preview(self):
+        page = _page()
+        start = page.index("function registerLocalPreview(inputId, layer)")
+        end = page.index("\n}", start)
+        preview = page[start:end]
+        assert "file && !isImageFile(file)" in preview
+        assert preview.index("file && !isImageFile(file)") < preview.index("URL.createObjectURL(file)")
+        assert "e.target.value = '';" in preview
+        assert "filter(name => name !== layer)" in preview
+
+    def test_processing_modal_uses_plain_language_steps(self):
+        page = _page()
+        assert 'id="processModal"' in page
+        for step in (
+            "画像を確認しています",
+            "目元を検出しています",
+            "まつ毛を抽出しています",
+            "加工画像に合成しています",
+            "仕上がりを準備しています",
+        ):
+            assert step in page
+        assert "showModal()" in page
+
+    def test_simple_flow_reuses_the_three_existing_processing_steps_in_order(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        calls = [flow.index(name) for name in ("createSession()", "runMatting()", "recompose()")]
+        assert calls == sorted(calls)
+
+    def test_simple_flow_restores_default_matting_thresholds_before_processing(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        reset = "control.value = control.defaultValue;"
+        assert reset in flow
+        assert flow.index(reset) < flow.index("createSession()")
+
+    def test_simple_flow_does_not_reload_the_result_already_loaded_by_recompose(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        assert "await showLayer('composite_on_edited');" not in flow
+
+    def test_success_actions_compare_download_and_open_the_same_advanced_session(self):
+        page = _page()
+        for marker in ("simpleResult", "simpleCompare", "simpleDownload", "openAdvancedMode"):
+            assert marker in page
+        assert "composite_on_edited" in page
+        assert "source_edited" in page
+
+    def test_failure_offers_detailed_adjustment_without_discarding_the_session(self):
+        page = _page()
+        assert 'id="processOpenAdvanced"' in page
+        assert "詳細調整を開く" in page
+        assert "state.session = null" not in page
+
+    def test_completed_result_is_at_least_100_percent_and_centered_on_the_product(self):
+        page = _page()
+        assert "function focusSimpleResult(focusRect)" in page
+        assert "Math.max(1," in page
+        assert "stage.scrollLeft" in page and "stage.scrollTop" in page
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        assert "const recomposeResult = await recompose();" in flow
+        assert "focusSimpleResult(recomposeResult.focus_rect);" in flow
+
+    def test_simple_layers_prioritize_the_three_user_images_then_extraction_outputs(self):
+        page = _page()
+        primary = (
+            ("simpleLayerOriginal", "装着画像（元）"),
+            ("simpleLayerEdited", "AI加工済み画像"),
+            ("simpleLayerResult", "合成結果"),
+        )
+        positions = []
+        for marker, label in primary:
+            assert f'id="{marker}"' in page
+            assert label in page
+            positions.append(page.index(f'id="{marker}"'))
+        assert positions == sorted(positions)
+        assert 'id="simpleExtractionLayers"' in page
+        assert "まつ毛の切り抜き" in page
+        assert "透過マスク（Alpha）" in page
+
+    def test_comparison_places_result_left_and_original_right(self):
+        page = _page()
+        assert 'id="compareMode" hidden' in page
+        left = page.index('id="compareResultCanvas"')
+        right = page.index('id="compareOriginalCanvas"')
+        assert left < right
+        assert "左：まつ毛装着後のAI画像" in page
+        assert "右：オリジナル装着画像" in page
+
+    def test_comparison_starts_on_lashes_and_minus_moves_toward_the_whole_image(self):
+        page = _page()
+        assert "compareZoomLevel: 1" in page
+        assert "state.compareZoomLevel - COMPARE_ZOOM_STEP" in page
+        assert "state.compareZoomLevel = 0" in page
+        assert "state.compareZoomLevel = 1" in page
+        assert "sourceFocusRect" in page and "simpleFocusRect" in page
+        assert "drawComparison()" in page
+
+    def test_comparison_can_stack_at_the_device_width_on_mobile(self):
+        page = _page()
+        assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in page
+        assert "@media (max-width: 700px)" in page
+        assert ".compare-grid { grid-template-columns: 1fr; }" in page
+
+    def test_success_opens_comparison_before_the_layer_result_view(self):
+        page = _page()
+        start = page.index("async function runSimpleFlow()")
+        end = page.index("\n}", start)
+        flow = page[start:end]
+        assert "await openComparison();" in flow
+        assert flow.index("await recompose();") < flow.index("await openComparison();")
+        assert "simpleResult.hidden = false;" not in flow
+
+    def test_completion_action_reasserts_comparison_instead_of_showing_the_result_view(self):
+        page = _page()
+        assert 'id="processClose" hidden>比較を表示</button>' in page
+        start = page.index("document.getElementById('processClose').onclick")
+        end = page.index("\n};", start)
+        handler = page[start:end]
+        assert "await openComparison();" in handler
+        assert "simpleResult.hidden = false" not in handler
+
+    def test_comparison_can_download_the_full_resolution_ai_lash_result(self):
+        page = _page()
+        assert 'id="compareDownload"' in page
+        assert 'download="matuge-ai-result.png"' in page
+        assert ">結果を保存</a>" in page
+        assert "compareDownload.href = `/api/image/${state.session}/composite_on_edited`;" in page
+
+    def test_result_download_uses_the_same_visual_style_as_buttons(self):
+        page = _page()
+        css = _common_css()
+        assert 'id="compareDownload" class="button-link"' in page
+        assert "button, .button-link" in css
+        assert ".button-link { display: inline-block; text-decoration: none; }" in css
+        assert ".button-link:focus-visible" in css
+
+
 class TestLocalPreview:
     def test_file_inputs_trigger_preview_before_analysis(self):
         page = _page()

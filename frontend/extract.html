@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>matuge-change PoC — 静止画モード（まつ毛Alpha抽出）</title>
 <link rel="stylesheet" href="/common.css">
 <style>
@@ -10,9 +11,6 @@
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #controls legend { font-size: 12px; color: #9ab; padding: 0 4px; }
   #viewBar { padding-top: 0; padding-bottom: 6px; background: transparent; }
-  /* ダウンロードリンクをボタンの見た目にする（<a>の中に<button>は無効なHTMLなので使わない） */
-  #btnDownload { display: inline-block; background: #555; color: #fff; border-radius: 6px;
-    padding: 6px 14px; font-size: 13px; text-decoration: none; cursor: pointer; }
   #stage { position: relative; margin: 0 auto 12px; overflow: auto; max-width: 98vw; height: 72vh; background: #111; }
   #canvasWrap { position: relative; transform-origin: 0 0; }
   canvas { position: absolute; left: 0; top: 0; image-rendering: auto; }
@@ -30,6 +28,66 @@
   #fitCanvas { display: none; z-index: 4; pointer-events: none; }
   #fitControls { color: #ffd; }
   #roiHint { font-size: 13px; color: #ffd; }
+  #simpleMode { max-width: 980px; margin: 24px auto; padding: 0 16px; text-align: center; }
+  #simpleMode h2 { margin-bottom: 6px; }
+  #simpleMode > p { color: #bbc; margin-top: 0; }
+  .simple-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 24px 0; }
+  .drop-zone { min-height: 240px; border: 2px dashed #667; border-radius: 14px; background: #292932;
+    padding: 18px; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 8px; transition: border-color .15s, background .15s; }
+  .drop-zone:hover, .drop-zone.dragging { border-color: #7d96ff; background: #303443; }
+  .drop-zone.has-file { border-style: solid; border-color: #5c78e8; }
+  .drop-zone strong { font-size: 17px; }
+  .drop-zone .drop-help { color: #abb; font-size: 13px; }
+  .drop-zone .file-name { color: #bcd0ff; font-size: 13px; overflow-wrap: anywhere; }
+  .drop-zone img { display: block; max-width: 100%; height: 130px; object-fit: contain; border-radius: 8px; }
+  .drop-zone img[hidden] { display: none; }
+  .simple-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  #simpleRun { font-size: 16px; padding: 11px 28px; }
+  #simpleError { min-height: 20px; color: #ffb3b3; margin: 10px 0; }
+  #simpleResult { max-width: 980px; margin: 16px auto 8px; padding: 16px; text-align: center;
+    border: 1px solid #435; border-radius: 10px; background: #262b2b; }
+  #simpleResult h2 { margin: 0 0 8px; }
+  #simpleLayerBar { margin: 14px 0; }
+  .simple-layer-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .simple-layer-group button.active { outline: 2px solid #a9b9ff; background: #3855c5; }
+  #simpleExtractionLayers { width: fit-content; margin: 10px auto; color: #bbc; font-size: 13px; }
+  #simpleExtractionLayers summary { cursor: pointer; }
+  #simpleExtractionLayers .simple-layer-group { margin-top: 8px; }
+  #compareMode { max-width: 1400px; margin: 16px auto; padding: 16px; text-align: center; }
+  #compareMode h2 { margin: 0 0 4px; }
+  #compareMode > p { color: #bbc; margin: 0 0 12px; }
+  .compare-controls { display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+    gap: 8px; margin: 12px 0; }
+  #compareZoomLabel { min-width: 100px; font-variant-numeric: tabular-nums; }
+  .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .compare-pane { margin: 0; background: #24242c; border: 1px solid #444956; border-radius: 10px; overflow: hidden; }
+  .compare-pane figcaption { padding: 9px; font-size: 14px; color: #dce3ff; }
+  .compare-pane canvas { position: static; display: block; width: 100%; height: auto; background: #111; }
+  #advancedMode { border-top: 1px solid #3b3b46; }
+  #advancedModeHeader { padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
+  #advancedModeHeader h2 { font-size: 16px; margin: 0; }
+  dialog#processModal { width: min(460px, calc(100vw - 32px)); border: 1px solid #596070; border-radius: 14px;
+    padding: 24px; background: #252630; color: #eee; box-sizing: border-box; }
+  dialog#processModal::backdrop { background: rgba(5, 7, 12, .78); }
+  #processModal h2 { margin-top: 0; }
+  #processSteps { list-style: none; padding: 0; margin: 18px 0; text-align: left; }
+  #processSteps li { color: #89909e; padding: 6px 0 6px 28px; position: relative; }
+  #processSteps li::before { content: '○'; position: absolute; left: 4px; }
+  #processSteps li.active { color: #fff; font-weight: 600; }
+  #processSteps li.active::before { content: '●'; color: #8ea4ff; }
+  #processSteps li.done { color: #aee5bd; }
+  #processSteps li.done::before { content: '✓'; }
+  #processProgress { height: 8px; background: #3b3d48; border-radius: 4px; overflow: hidden; }
+  #processProgressBar { height: 100%; width: 0; background: #6d88ff; transition: width .2s; }
+  #processMessage { min-height: 40px; margin: 14px 0 4px; color: #cbd4ff; }
+  #processMessage.error { color: #ffb3b3; }
+  #processActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  @media (max-width: 700px) {
+    .simple-inputs { grid-template-columns: 1fr; }
+    .drop-zone { min-height: 190px; }
+    .compare-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -41,10 +99,91 @@
   <a href="/video.html">動画モード</a>
 </nav>
 
+<main id="simpleMode">
+  <h2>2枚の画像から、まつ毛を自動で合成</h2>
+  <p>画像を選んで「処理を実行」を押してください。うまくいかない部分だけ、あとから詳しく調整できます。</p>
+  <div class="simple-inputs">
+    <label class="drop-zone" id="dropWith" for="fileWith" tabindex="0">
+      <strong>① 装着画像</strong>
+      <span class="drop-help">まつ毛を装着した元画像をドロップ<br>またはクリックして選択</span>
+      <img id="previewWith" alt="装着画像のプレビュー" hidden>
+      <span class="file-name" id="nameWith">画像が選択されていません</span>
+      <input type="file" id="fileWith" accept="image/*" hidden>
+    </label>
+    <label class="drop-zone" id="dropEdited" for="fileEdited" tabindex="0">
+      <strong>② AI加工済み画像</strong>
+      <span class="drop-help">まつ毛を貼り戻す画像をドロップ<br>またはクリックして選択</span>
+      <img id="previewEdited" alt="AI加工済み画像のプレビュー" hidden>
+      <span class="file-name" id="nameEdited">画像が選択されていません</span>
+      <input type="file" id="fileEdited" accept="image/*" hidden>
+    </label>
+  </div>
+  <div id="simpleError" role="alert"></div>
+  <div class="simple-actions">
+    <button id="simpleRun" disabled>処理を実行</button>
+    <button id="simpleOpenAdvanced" class="secondary">詳細調整を開く</button>
+  </div>
+</main>
+
+<section id="simpleResult" hidden>
+  <h2>処理が完了しました</h2>
+  <p>仕上がりを確認し、必要な場合だけ詳細調整を開いてください。</p>
+  <div id="simpleLayerBar">
+    <div class="simple-layer-group" aria-label="主要な画像">
+      <button id="simpleLayerOriginal" class="secondary" data-simple-layer="source_with">装着画像（元）</button>
+      <button id="simpleLayerEdited" class="secondary" data-simple-layer="source_edited">AI加工済み画像</button>
+      <button id="simpleLayerResult" class="secondary active" data-simple-layer="composite_on_edited">合成結果</button>
+    </div>
+    <details id="simpleExtractionLayers">
+      <summary>抽出結果を確認</summary>
+      <div class="simple-layer-group">
+        <button id="simpleLayerProduct" class="secondary" data-simple-layer="product_rgba">まつ毛の切り抜き</button>
+        <button id="simpleLayerAlpha" class="secondary" data-simple-layer="alpha">透過マスク（Alpha）</button>
+      </div>
+    </details>
+  </div>
+  <div class="simple-actions">
+    <a id="simpleDownload" class="button-link" download="composite_on_edited.png">完成画像を保存</a>
+    <button id="simpleCompare" class="secondary">比較モードを開く</button>
+    <button id="resultOpenAdvanced" class="secondary">詳細調整を開く</button>
+    <button id="simpleRestart" class="secondary">別の画像でやり直す</button>
+  </div>
+</section>
+
+<section id="compareMode" hidden>
+  <h2>まつ毛を比較</h2>
+  <p>左右それぞれのまつ毛位置を中心に、同じ段階で拡大・縮小します。</p>
+  <div class="compare-controls">
+    <button id="compareZoomOut" class="secondary" aria-label="縮小">−</button>
+    <span id="compareZoomLabel">まつ毛</span>
+    <button id="compareZoomIn" class="secondary" aria-label="拡大">＋</button>
+    <button id="compareFocus" class="secondary">まつ毛</button>
+    <button id="compareFull" class="secondary">全体</button>
+    <a id="compareDownload" class="button-link" download="matuge-ai-result.png">結果を保存</a>
+    <button id="compareClose">比較を閉じる</button>
+  </div>
+  <div class="compare-grid">
+    <figure class="compare-pane">
+      <figcaption>左：まつ毛装着後のAI画像</figcaption>
+      <canvas id="compareResultCanvas" width="720" height="520"></canvas>
+    </figure>
+    <figure class="compare-pane">
+      <figcaption>右：オリジナル装着画像</figcaption>
+      <canvas id="compareOriginalCanvas" width="720" height="520"></canvas>
+    </figure>
+  </div>
+</section>
+
+<section id="advancedMode" hidden>
+<div id="advancedModeHeader">
+  <h2>詳細調整</h2>
+  <button id="backToSimple" class="secondary">簡易モードへ戻る</button>
+</div>
+
 <div class="bar" id="controls">
   <fieldset class="group">
     <legend>① 入力と解析</legend>
-    <label>装着画像: <input type="file" id="fileWith" accept="image/*"></label>
+    <button id="changeWith" class="secondary">装着画像を変更</button>
     <label>未装着画像(任意): <input type="file" id="fileWithout" accept="image/*"></label>
     <label>目元の指定:
       <select id="roiMode">
@@ -83,7 +222,7 @@
 
   <fieldset class="group">
     <legend>③ AI加工画像へ再合成</legend>
-    <label>編集済み画像: <input type="file" id="fileEdited" accept="image/*"></label>
+    <button id="changeEdited" class="secondary">AI加工済み画像を変更</button>
     <span id="fitControls">
       <button id="btnFit" class="secondary">位置合わせ</button>
       <label>スケール <input id="fitScale" type="number" min="10" max="400" step="1" value="100">%</label>
@@ -111,10 +250,12 @@
     <button id="btnArchiveRestore" class="secondary" title="退避済みセッションをこのサーバへ復元">取り込み</button>
   </fieldset>
 </div>
+</section>
 
-<div class="status" id="status">① 装着画像を選んで「解析開始」→ ② 必要ならブラシで補正して「Matting実行」→ ③ AI加工画像を選んで「再合成」。</div>
+<section id="workspace" hidden>
+<div class="status" id="status" hidden>① 装着画像を選んで「解析開始」→ ② 必要ならブラシで補正して「Matting実行」→ ③ AI加工画像を選んで「再合成」。</div>
 
-<div class="bar" id="viewBar">
+<div class="bar" id="viewBar" hidden>
   <label>表示:
     <select id="layerSelect">
       <option value="" disabled selected>（画像を選ぶとプレビューできます）</option>
@@ -127,7 +268,7 @@
     <button id="btnZoomFit" class="secondary">全体</button>
     <button id="btnZoomReset" class="secondary">100%</button>
   </label>
-  <a id="btnDownload" download>表示中レイヤーを保存</a>
+  <a id="btnDownload" class="button-link secondary" download>表示中レイヤーを保存</a>
 </div>
 
 <div id="stage">
@@ -139,6 +280,25 @@
     <div id="roiOverlayB" class="roi-overlay"></div>
   </div>
 </div>
+</section>
+
+<dialog id="processModal" aria-labelledby="processTitle">
+  <h2 id="processTitle">画像を処理しています</h2>
+  <ol id="processSteps">
+    <li data-step="0">画像を確認しています</li>
+    <li data-step="1">目元を検出しています</li>
+    <li data-step="2">まつ毛を抽出しています</li>
+    <li data-step="3">加工画像に合成しています</li>
+    <li data-step="4">仕上がりを準備しています</li>
+  </ol>
+  <div id="processProgress"><div id="processProgressBar"></div></div>
+  <p id="processMessage" aria-live="polite">準備しています…</p>
+  <div id="processActions">
+    <button id="processRetry" class="secondary" hidden>もう一度実行</button>
+    <button id="processOpenAdvanced" class="secondary" hidden>詳細調整を開く</button>
+    <button id="processClose" hidden>比較を表示</button>
+  </div>
+</dialog>
 
 <script>
 const state = {
@@ -146,7 +306,8 @@ const state = {
   strokes: [], current: null, supabase: null, channel: null,
   zoom: 1, localUrls: {}, roiA: null, roiB: null, activeRoi: null,
   fitMode: false, fitScale: 100, fitAngle: 0, fitFlip: false,
-  productBBox: null, fitCenter: null, fitDrag: null,
+  productBBox: null, fitCenter: null, fitDrag: null, simpleRunning: false,
+  simpleFocusRect: null, sourceFocusRect: null, compareZoomLevel: 1, compareImages: {},
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
@@ -328,12 +489,25 @@ function showLayer(name) {
   });
 }
 
+const isImageFile = (file) => !!file && file.type.startsWith('image/');
+const invalidImageMessage = 'このファイルは画像ではありません。画像ファイルを選択してください。';
+
 // 解析を待たずに選択画像を確認できるよう、ファイル選択時点でプレビュー用レイヤーを足す
 function registerLocalPreview(inputId, layer) {
   document.getElementById(inputId).addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (state.localUrls[layer]) URL.revokeObjectURL(state.localUrls[layer]);
-    if (!file) { delete state.localUrls[layer]; return; }
+    delete state.localUrls[layer];
+    if (file && !isImageFile(file)) {
+      e.target.value = '';
+      const sel = document.getElementById('layerSelect');
+      const layers = [...sel.options].map(o => o.value).filter(name => name !== layer);
+      setLayerOptions(layers);
+      document.getElementById('simpleError').textContent = invalidImageMessage;
+      status(invalidImageMessage);
+      return;
+    }
+    if (!file) return;
     state.localUrls[layer] = URL.createObjectURL(file);
     const sel = document.getElementById('layerSelect');
     const layers = [...sel.options].map(o => o.value);
@@ -346,6 +520,94 @@ registerLocalPreview('fileWith', 'local_with');
 registerLocalPreview('fileWithout', 'local_without');
 document.getElementById('fileWithout').addEventListener('change', () => updateRoiHint());
 registerLocalPreview('fileEdited', 'local_edited');
+
+const simpleMode = document.getElementById('simpleMode');
+const advancedMode = document.getElementById('advancedMode');
+const workspace = document.getElementById('workspace');
+const simpleResult = document.getElementById('simpleResult');
+const compareMode = document.getElementById('compareMode');
+
+function updateSimpleRunAvailability() {
+  const ready = document.getElementById('fileWith').files[0]
+    && document.getElementById('fileEdited').files[0];
+  document.getElementById('simpleRun').disabled = !ready || state.simpleRunning;
+}
+
+function setupDropZone({ zoneId, inputId, previewId, nameId, layer }) {
+  const zone = document.getElementById(zoneId);
+  const input = document.getElementById(inputId);
+  const preview = document.getElementById(previewId);
+  const name = document.getElementById(nameId);
+  const showFile = () => {
+    const file = input.files[0];
+    if (!file) {
+      preview.hidden = true;
+      name.textContent = '画像が選択されていません';
+      zone.classList.remove('has-file');
+      updateSimpleRunAvailability();
+      return;
+    }
+    preview.src = state.localUrls[layer];
+    preview.hidden = false;
+    name.textContent = file.name;
+    zone.classList.add('has-file');
+    document.getElementById('simpleError').textContent = '';
+    updateSimpleRunAvailability();
+  };
+  input.addEventListener('change', showFile);
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragging'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragging'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragging');
+    const file = e.dataTransfer.files[0];
+    if (!isImageFile(file)) {
+      document.getElementById('simpleError').textContent = invalidImageMessage;
+      return;
+    }
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  zone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); }
+  });
+}
+
+setupDropZone({
+  zoneId: 'dropWith', inputId: 'fileWith', previewId: 'previewWith', nameId: 'nameWith', layer: 'local_with',
+});
+setupDropZone({
+  zoneId: 'dropEdited', inputId: 'fileEdited', previewId: 'previewEdited', nameId: 'nameEdited', layer: 'local_edited',
+});
+
+function openAdvancedMode() {
+  simpleMode.hidden = true;
+  simpleResult.hidden = true;
+  compareMode.hidden = true;
+  advancedMode.hidden = false;
+  workspace.hidden = false;
+  document.getElementById('status').hidden = false;
+  document.getElementById('viewBar').hidden = false;
+  const modal = document.getElementById('processModal');
+  if (modal.open) modal.close();
+  updateFitAvailability();
+}
+
+document.getElementById('simpleOpenAdvanced').onclick = openAdvancedMode;
+document.getElementById('resultOpenAdvanced').onclick = openAdvancedMode;
+document.getElementById('processOpenAdvanced').onclick = openAdvancedMode;
+document.getElementById('backToSimple').onclick = () => {
+  advancedMode.hidden = true;
+  simpleMode.hidden = false;
+  simpleResult.hidden = !state.simpleFocusRect;
+  document.getElementById('status').hidden = true;
+  document.getElementById('viewBar').hidden = true;
+  workspace.hidden = simpleResult.hidden;
+};
+document.getElementById('changeWith').onclick = () => document.getElementById('fileWith').click();
+document.getElementById('changeEdited').onclick = () => document.getElementById('fileEdited').click();
 
 // 横顔・目のアップは顔検出が効かないため、元画像上でドラッグした矩形を目元ROIとして送る
 const roiModeSelect = document.getElementById('roiMode');
@@ -731,39 +993,43 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoPaint(); }
 });
 
-document.getElementById('btnUpload').onclick = async () => {
+async function createSession() {
   const fw = document.getElementById('fileWith').files[0];
-  if (!fw) { status('装着画像を選択してください'); return; }
+  if (!fw) throw new Error('装着画像を選択してください');
   const fd = new FormData();
   fd.append('image_with', fw);
   const fo = document.getElementById('fileWithout').files[0];
   if (fo) fd.append('image_without', fo);
   if (isManualRoi()) {
-    if (!state.roiA) { status('ROI-A 指定を押して装着画像でROIを囲んでください'); return; }
+    if (!state.roiA) throw new Error('ROI-A 指定を押して装着画像でROIを囲んでください');
     fd.append('roi_rect', state.roiA.map(Math.round).join(','));
   }
   status(isManualRoi() ? '解析中…（手動ROI・差分計算）' : '解析中…（顔検出・位置合わせ・差分計算）');
-  let data;
-  try {
-    data = await postForm('/api/session', fd);
-  } catch (e) {
-    // 横顔・目のアップで顔検出が失敗するのは想定内。行き止まりにせず手動ROIに誘導する
-    if (!isManualRoi() && /no face/.test(e.message)) { fallbackToManualRoi(); return; }
-    status('エラー: ' + e.message);
-    return;
-  }
+  const data = await postForm('/api/session', fd);
   state.session = data.session_id;
   state.w = data.width; state.h = data.height;
   state.strokes = [];
   paintBackup = null;
   fitImage = null;
   state.productBBox = null;
+  state.sourceFocusRect = data.source_focus_rect || null;
   state.fitMode = false;
   resetHistory();
   pctx.clearRect(0, 0, 4096, 4096);
-  setLayerOptions(data.layers);
+  await setLayerOptions(data.layers);
   document.getElementById('sessionId').value = data.session_id;
   status(`解析完了 (session ${data.session_id})。Probability を確認し、必要ならブラシで補正して Matting を実行してください。`);
+  return data;
+}
+
+document.getElementById('btnUpload').onclick = async () => {
+  try {
+    await createSession();
+  } catch (e) {
+    // 横顔・目のアップで顔検出が失敗するのは想定内。行き止まりにせず手動ROIに誘導する
+    if (!isManualRoi() && /no face/.test(e.message)) { fallbackToManualRoi(); return; }
+    status('エラー: ' + e.message);
+  }
 };
 
 document.getElementById('layerSelect').onchange = (e) => showLayer(e.target.value);
@@ -778,6 +1044,7 @@ async function resumeSession(sid) {
   state.roiA = data.roi_rect || null;
   state.roiB = data.dest_rect || null;
   state.productBBox = data.product_bbox || null;
+  state.sourceFocusRect = data.roi_rect || null;
   state.fitAngle = data.dest_angle || 0;
   state.fitFlip = !!data.dest_flip;
   state.fitScale = 100;
@@ -911,14 +1178,13 @@ window.addEventListener('pointerup', () => {
   persistStrokes();
 });
 
-document.getElementById('btnRecompose').onclick = async () => {
-  if (!state.session) { status('まだセッションがありません。装着画像を選んで「解析開始」を押してください'); return; }
+async function recompose() {
+  if (!state.session) throw new Error('まだセッションがありません。装着画像を選んで「解析開始」を押してください');
   const fe = document.getElementById('fileEdited').files[0];
-  if (!fe) { status('編集済み画像を選択してください'); return; }
+  if (!fe) throw new Error('AI加工済み画像を選択してください');
   if (isManualRoi() && !state.roiB) {
-    status('加工画像で ROI-B を指定してください');
     armRoi('b');
-    return;
+    throw new Error('加工画像で ROI-B を指定してください');
   }
   status(isManualRoi() ? '再合成中…（ROI-Bへ貼付）' : '再合成中…（顔検出・位置合わせ・Alpha合成）');
   const fd = new FormData();
@@ -933,30 +1199,34 @@ document.getElementById('btnRecompose').onclick = async () => {
     fd.append('angle', String(state.fitAngle));
     fd.append('flip', String(state.fitFlip));
   }
-  try {
-    const result = await postForm('/api/recompose', fd);
-    if (result.dest_rect) {
-      state.roiB = result.dest_rect;
-      state.fitScale = 100;
-      initializeFitCenter(true);
-      document.getElementById('fitScale').value = state.fitScale;
-    }
-    if (result.product_bbox) state.productBBox = result.product_bbox;
-    state.fitAngle = result.angle || 0;
-    state.fitFlip = !!result.flip;
-  } catch (e) {
-    status('エラー: ' + e.message);
-    return;
+  const result = await postForm('/api/recompose', fd);
+  if (result.dest_rect) {
+    state.roiB = result.dest_rect;
+    state.fitScale = 100;
+    initializeFitCenter(true);
+    document.getElementById('fitScale').value = state.fitScale;
   }
+  if (result.product_bbox) state.productBBox = result.product_bbox;
+  state.fitAngle = result.angle || 0;
+  state.fitFlip = !!result.flip;
   const sel = document.getElementById('layerSelect');
   const layers = [...sel.options].map(o => o.value);
   if (!layers.includes('source_edited')) layers.push('source_edited');
   if (!layers.includes('composite_on_edited')) layers.push('composite_on_edited');
-  setLayerOptions(layers);
+  await setLayerOptions(layers);
   sel.value = 'composite_on_edited';
-  showLayer('composite_on_edited');
+  await showLayer('composite_on_edited');
   updateFitHint();
   status('再合成完了。「表示中レイヤーを保存」でダウンロードできます。');
+  return result;
+}
+
+document.getElementById('btnRecompose').onclick = async () => {
+  try {
+    await recompose();
+  } catch (e) {
+    status('エラー: ' + e.message);
+  }
 };
 
 const setProgress = (pct) => document.getElementById('progressBar').style.width = `${pct}%`;
@@ -970,6 +1240,7 @@ async function connectRealtime() {
 
 function onJobUpdate(job, resolve) {
   setProgress(job.progress);
+  if (state.simpleRunning && job.status === 'running') setSimpleStage(2, job.progress);
   if (job.status === 'running') status(`Matting 実行中… ${job.stage || ''} ${job.progress}%`);
   if (job.status === 'done' || job.status === 'failed') resolve(job);
 }
@@ -995,8 +1266,8 @@ async function followWithPolling(jobId) {
   }
 }
 
-document.getElementById('btnMatte').onclick = async () => {
-  if (!state.session) { status('まだセッションがありません。装着画像を選んで「解析開始」を押してください'); return; }
+async function runMatting() {
+  if (!state.session) throw new Error('まだセッションがありません。装着画像を選んで「解析開始」を押してください');
   status('Matting をキューに投入中…');
   setProgress(0);
   document.getElementById('btnMatte').disabled = true;
@@ -1007,26 +1278,307 @@ document.getElementById('btnMatte').onclick = async () => {
   const blank = !paintBackup || paintBackup.data.every((v, i) => (i % 4 !== 3) || v === 0);
   if (!blank) fd.append('constraints_png', paintCanvas.toDataURL('image/png'));
   try {
-    let jobId;
-    try {
-      ({ job_id: jobId } = await postForm('/api/matte/jobs', fd));
-    } catch (e) {
-      status('エラー: ' + e.message);
-      return;
-    }
+    const { job_id: jobId } = await postForm('/api/matte/jobs', fd);
     const job = state.supabase ? await followWithRealtime(jobId) : await followWithPolling(jobId);
-    if (job.status === 'failed') { status('Matting 失敗: ' + job.error); return; }
+    if (job.status === 'failed') throw new Error('Matting 失敗: ' + job.error);
     const prev = [...document.getElementById('layerSelect').options].map(o => o.value);
     const base = ['roi_a'];
     if (document.getElementById('fileWithout').files[0] || prev.includes('roi_b')) base.push('roi_b');
     const layers = [...base, ...prev.filter(isSourceLayer), 'difference', 'probability', ...job.result.layers];
     if (prev.includes('composite_on_edited')) layers.push('composite_on_edited');
-    setLayerOptions(layers);
+    await setLayerOptions(layers);
     status(`Matting 完了。再合成誤差 (mean abs, 0-255): ${job.result.reconstruction_error.toFixed(2)}`);
+    return job;
   } finally {
     document.getElementById('btnMatte').disabled = false;
     setProgress(0);
   }
+}
+
+document.getElementById('btnMatte').onclick = async () => {
+  try {
+    await runMatting();
+  } catch (e) {
+    status('エラー: ' + e.message);
+  }
+};
+
+const processModal = document.getElementById('processModal');
+const processMessage = document.getElementById('processMessage');
+
+function setSimpleStage(active, jobProgress = null) {
+  const bases = [5, 20, 35, 80, 95];
+  for (const item of document.querySelectorAll('#processSteps li')) {
+    const step = Number(item.dataset.step);
+    item.classList.toggle('done', step < active);
+    item.classList.toggle('active', step === active);
+  }
+  const pct = active === 2 && jobProgress !== null ? 35 + jobProgress * .4 : bases[active];
+  document.getElementById('processProgressBar').style.width = `${Math.min(100, pct)}%`;
+  const current = document.querySelector(`#processSteps li[data-step="${active}"]`);
+  if (current) processMessage.textContent = current.textContent;
+}
+
+function openProcessModal() {
+  document.getElementById('processTitle').textContent = '画像を処理しています';
+  processMessage.classList.remove('error');
+  document.getElementById('processRetry').hidden = true;
+  document.getElementById('processOpenAdvanced').hidden = true;
+  document.getElementById('processClose').hidden = true;
+  for (const item of document.querySelectorAll('#processSteps li')) item.className = '';
+  document.getElementById('processProgressBar').style.width = '0%';
+  if (!processModal.open) processModal.showModal();
+}
+
+processModal.addEventListener('cancel', (e) => {
+  if (state.simpleRunning) e.preventDefault();
+});
+
+function focusSimpleLayer(focusRect) {
+  const valid = Array.isArray(focusRect) && focusRect.length === 4;
+  const rect = valid ? focusRect : [0, 0, baseCanvas.width, baseCanvas.height];
+  const width = Math.max(1, rect[2] - rect[0]);
+  const height = Math.max(1, rect[3] - rect[1]);
+  // Keep the actual pixels readable, while leaving enough surrounding eye context in view.
+  const focusZoom = Math.min(stage.clientWidth / (width * 1.25), stage.clientHeight / (height * 1.5));
+  setZoom(Math.min(4, Math.max(1, focusZoom)));
+  requestAnimationFrame(() => {
+    const centerX = (rect[0] + rect[2]) / 2 * state.zoom;
+    const centerY = (rect[1] + rect[3]) / 2 * state.zoom;
+    stage.scrollLeft = Math.max(0, centerX - stage.clientWidth / 2);
+    stage.scrollTop = Math.max(0, centerY - stage.clientHeight / 2);
+  });
+}
+
+function focusSimpleResult(focusRect) {
+  state.simpleFocusRect = Array.isArray(focusRect) ? focusRect : null;
+  focusSimpleLayer(focusRect);
+}
+
+async function showSimpleLayer(button) {
+  const layer = button.dataset.simpleLayer;
+  await showLayer(layer);
+  for (const item of document.querySelectorAll('[data-simple-layer]'))
+    item.classList.toggle('active', item === button);
+  if (layer === 'source_with') focusSimpleLayer(state.sourceFocusRect);
+  else if (layer === 'source_edited' || layer === 'composite_on_edited')
+    focusSimpleLayer(state.simpleFocusRect);
+  else fitZoom();
+}
+
+for (const button of document.querySelectorAll('[data-simple-layer]'))
+  button.onclick = () => showSimpleLayer(button);
+
+const COMPARE_ZOOM_STEP = 0.25;
+const compareResultCanvas = document.getElementById('compareResultCanvas');
+const compareOriginalCanvas = document.getElementById('compareOriginalCanvas');
+const compareDownload = document.getElementById('compareDownload');
+
+function aspectView(cx, cy, width, height, aspect) {
+  let viewWidth = width;
+  let viewHeight = height;
+  if (viewWidth / viewHeight > aspect) viewHeight = viewWidth / aspect;
+  else viewWidth = viewHeight * aspect;
+  return [cx - viewWidth / 2, cy - viewHeight / 2, cx + viewWidth / 2, cy + viewHeight / 2];
+}
+
+function comparisonView(image, focusRect, level, aspect) {
+  const full = aspectView(image.width / 2, image.height / 2, image.width, image.height, aspect);
+  const valid = Array.isArray(focusRect) && focusRect.length === 4;
+  if (!valid) return full;
+  const focusWidth = Math.max(1, focusRect[2] - focusRect[0]) * 1.15;
+  const focusHeight = Math.max(1, focusRect[3] - focusRect[1]) * 1.15;
+  const focus = aspectView(
+    (focusRect[0] + focusRect[2]) / 2,
+    (focusRect[1] + focusRect[3]) / 2,
+    focusWidth,
+    focusHeight,
+    aspect,
+  );
+  return full.map((value, index) => value + (focus[index] - value) * level);
+}
+
+function drawCompareImage(canvas, image, focusRect) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const view = comparisonView(
+    image,
+    focusRect,
+    state.compareZoomLevel,
+    canvas.width / canvas.height,
+  );
+  const viewWidth = view[2] - view[0], viewHeight = view[3] - view[1];
+  const sx0 = Math.max(0, view[0]), sy0 = Math.max(0, view[1]);
+  const sx1 = Math.min(image.width, view[2]), sy1 = Math.min(image.height, view[3]);
+  if (sx1 <= sx0 || sy1 <= sy0) return;
+  const dx = (sx0 - view[0]) / viewWidth * canvas.width;
+  const dy = (sy0 - view[1]) / viewHeight * canvas.height;
+  const dw = (sx1 - sx0) / viewWidth * canvas.width;
+  const dh = (sy1 - sy0) / viewHeight * canvas.height;
+  ctx.drawImage(image, sx0, sy0, sx1 - sx0, sy1 - sy0, dx, dy, dw, dh);
+}
+
+function updateCompareControls() {
+  const level = state.compareZoomLevel;
+  const label = level >= 1 ? 'まつ毛' : level <= 0 ? '全体' : level >= .65 ? '目元' : '顔';
+  document.getElementById('compareZoomLabel').textContent = label;
+  document.getElementById('compareZoomOut').disabled = level <= 0;
+  document.getElementById('compareZoomIn').disabled = level >= 1;
+}
+
+function drawComparison() {
+  if (!state.compareImages.result || !state.compareImages.original) return;
+  drawCompareImage(compareResultCanvas, state.compareImages.result, state.simpleFocusRect);
+  drawCompareImage(compareOriginalCanvas, state.compareImages.original, state.sourceFocusRect);
+  updateCompareControls();
+}
+
+function loadSessionImage(layer) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`${LAYER_NAMES[layer] || layer}を読み込めませんでした`));
+    image.src = `/api/image/${state.session}/${layer}?t=${Date.now()}`;
+  });
+}
+
+async function openComparison() {
+  state.compareZoomLevel = 1;
+  compareDownload.href = `/api/image/${state.session}/composite_on_edited`;
+  try {
+    const [result, original] = await Promise.all([
+      loadSessionImage('composite_on_edited'),
+      loadSessionImage('source_with'),
+    ]);
+    state.compareImages = { result, original };
+  } catch (e) {
+    status('比較画像の読み込みエラー: ' + e.message);
+    openAdvancedMode();
+    return false;
+  }
+  simpleResult.hidden = true;
+  workspace.hidden = true;
+  compareMode.hidden = false;
+  drawComparison();
+  compareMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  return true;
+}
+
+document.getElementById('compareZoomOut').onclick = () => {
+  state.compareZoomLevel = Math.max(0, state.compareZoomLevel - COMPARE_ZOOM_STEP);
+  drawComparison();
+};
+document.getElementById('compareZoomIn').onclick = () => {
+  state.compareZoomLevel = Math.min(1, state.compareZoomLevel + COMPARE_ZOOM_STEP);
+  drawComparison();
+};
+document.getElementById('compareFocus').onclick = () => {
+  state.compareZoomLevel = 1;
+  drawComparison();
+};
+document.getElementById('compareFull').onclick = () => {
+  state.compareZoomLevel = 0;
+  drawComparison();
+};
+document.getElementById('compareClose').onclick = async () => {
+  compareMode.hidden = true;
+  simpleResult.hidden = false;
+  workspace.hidden = false;
+  await showSimpleLayer(document.getElementById('simpleLayerResult'));
+};
+
+function explainSimpleError(error) {
+  const message = error.message || String(error);
+  if (/no face detected in the worn image/.test(message))
+    return '装着画像から顔を検出できませんでした。詳細調整で目元の範囲を指定してください。';
+  if (/no face detected in the edited image/.test(message))
+    return 'AI加工済み画像から顔を検出できませんでした。詳細調整で貼り付け先を指定してください。';
+  if (/Matting/.test(message))
+    return 'まつ毛の抽出を完了できませんでした。詳細調整で範囲やブラシを確認してください。';
+  return `処理を完了できませんでした。もう一度試すか、詳細調整を開いてください。\n${message}`;
+}
+
+async function runSimpleFlow() {
+  if (state.simpleRunning) return;
+  const worn = document.getElementById('fileWith').files[0];
+  const edited = document.getElementById('fileEdited').files[0];
+  if (!worn || !edited) {
+    document.getElementById('simpleError').textContent = '装着画像とAI加工済み画像の両方を選択してください。';
+    return;
+  }
+  state.simpleRunning = true;
+  updateSimpleRunAvailability();
+  state.simpleFocusRect = null;
+  state.sourceFocusRect = null;
+  state.compareImages = {};
+  compareMode.hidden = true;
+  simpleResult.hidden = true;
+  document.getElementById('simpleError').textContent = '';
+  for (const id of ['fgThresh', 'bgThresh']) {
+    const control = document.getElementById(id);
+    control.value = control.defaultValue;
+  }
+  roiModeSelect.value = 'auto';
+  updateRoiHint();
+  openProcessModal();
+  try {
+    setSimpleStage(0);
+    await Promise.resolve();
+    setSimpleStage(1);
+    await createSession();
+    setSimpleStage(2, 0);
+    await runMatting();
+    setSimpleStage(3);
+    const recomposeResult = await recompose();
+    setSimpleStage(4);
+    focusSimpleResult(recomposeResult.focus_rect);
+    document.getElementById('simpleDownload').href = `/api/image/${state.session}/composite_on_edited`;
+    await openComparison();
+    for (const item of document.querySelectorAll('#processSteps li')) {
+      item.classList.remove('active'); item.classList.add('done');
+    }
+    document.getElementById('processProgressBar').style.width = '100%';
+    document.getElementById('processTitle').textContent = '処理が完了しました';
+    processMessage.textContent = '比較モードを表示しました。左右の仕上がりを確認してください。';
+    document.getElementById('processClose').hidden = false;
+  } catch (e) {
+    if (/no face detected in the worn image/.test(e.message) && !isManualRoi()) fallbackToManualRoi();
+    if (/no face detected in the edited image/.test(e.message)) {
+      roiModeSelect.value = 'manual';
+      updateRoiHint();
+    }
+    document.getElementById('processTitle').textContent = '処理を完了できませんでした';
+    processMessage.textContent = explainSimpleError(e);
+    processMessage.classList.add('error');
+    document.getElementById('processRetry').hidden = false;
+    document.getElementById('processOpenAdvanced').hidden = false;
+  } finally {
+    state.simpleRunning = false;
+    updateSimpleRunAvailability();
+  }
+}
+
+document.getElementById('simpleRun').onclick = runSimpleFlow;
+document.getElementById('processRetry').onclick = () => {
+  processModal.close();
+  runSimpleFlow();
+};
+document.getElementById('processClose').onclick = async () => {
+  processModal.close();
+  if (compareMode.hidden) {
+    const opened = await openComparison();
+    if (!opened) return;
+  }
+  compareMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+document.getElementById('simpleCompare').onclick = openComparison;
+document.getElementById('simpleRestart').onclick = () => {
+  compareMode.hidden = true;
+  simpleResult.hidden = true;
+  workspace.hidden = true;
+  simpleMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  document.getElementById('fileWith').click();
 };
 
 const catalogInfo = (msg) => document.getElementById('catalogInfo').textContent = msg;

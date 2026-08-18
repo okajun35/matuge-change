@@ -1,9 +1,11 @@
 body { font-family: system-ui, sans-serif; margin: 0; background: #1e1e24; color: #eee; }
 header { padding: 10px 16px; background: #2a2a33; }
 header h1 { font-size: 16px; margin: 0; }
-button { background: #4a6cf7; color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-button.secondary { background: #555; }
+button, .button-link { background: #4a6cf7; color: #fff; border: 0; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+button.secondary, .button-link.secondary { background: #555; }
 button:disabled { opacity: .4; cursor: default; }
+.button-link { display: inline-block; text-decoration: none; }
+button:focus-visible, .button-link:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 select, input[type=range] { vertical-align: middle; }
 input[type=text] { background: #1e1e24; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 5px; }
 .sep { border-left: 1px solid #555; height: 24px; }
