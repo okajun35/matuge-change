@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>matuge-change PoC — 静止画モード（まつ毛Alpha抽出）</title>
 <link rel="stylesheet" href="/common.css">
 <style>
@@ -50,8 +51,24 @@
   #simpleResult { max-width: 980px; margin: 16px auto 8px; padding: 16px; text-align: center;
     border: 1px solid #435; border-radius: 10px; background: #262b2b; }
   #simpleResult h2 { margin: 0 0 8px; }
+  #simpleLayerBar { margin: 14px 0; }
+  .simple-layer-group { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .simple-layer-group button.active { outline: 2px solid #a9b9ff; background: #3855c5; }
+  #simpleExtractionLayers { width: fit-content; margin: 10px auto; color: #bbc; font-size: 13px; }
+  #simpleExtractionLayers summary { cursor: pointer; }
+  #simpleExtractionLayers .simple-layer-group { margin-top: 8px; }
   #simpleDownload { display: inline-block; background: #4a6cf7; color: #fff; border-radius: 6px;
     padding: 8px 16px; font-size: 13px; text-decoration: none; }
+  #compareMode { max-width: 1400px; margin: 16px auto; padding: 16px; text-align: center; }
+  #compareMode h2 { margin: 0 0 4px; }
+  #compareMode > p { color: #bbc; margin: 0 0 12px; }
+  .compare-controls { display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+    gap: 8px; margin: 12px 0; }
+  #compareZoomLabel { min-width: 100px; font-variant-numeric: tabular-nums; }
+  .compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .compare-pane { margin: 0; background: #24242c; border: 1px solid #444956; border-radius: 10px; overflow: hidden; }
+  .compare-pane figcaption { padding: 9px; font-size: 14px; color: #dce3ff; }
+  .compare-pane canvas { position: static; display: block; width: 100%; height: auto; background: #111; }
   #advancedMode { border-top: 1px solid #3b3b46; }
   #advancedModeHeader { padding: 10px 16px; display: flex; justify-content: space-between; align-items: center; }
   #advancedModeHeader h2 { font-size: 16px; margin: 0; }
@@ -74,6 +91,7 @@
   @media (max-width: 700px) {
     .simple-inputs { grid-template-columns: 1fr; }
     .drop-zone { min-height: 190px; }
+    .compare-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -115,11 +133,48 @@
 <section id="simpleResult" hidden>
   <h2>処理が完了しました</h2>
   <p>仕上がりを確認し、必要な場合だけ詳細調整を開いてください。</p>
+  <div id="simpleLayerBar">
+    <div class="simple-layer-group" aria-label="主要な画像">
+      <button id="simpleLayerOriginal" class="secondary" data-simple-layer="source_with">装着画像（元）</button>
+      <button id="simpleLayerEdited" class="secondary" data-simple-layer="source_edited">AI加工済み画像</button>
+      <button id="simpleLayerResult" class="secondary active" data-simple-layer="composite_on_edited">合成結果</button>
+    </div>
+    <details id="simpleExtractionLayers">
+      <summary>抽出結果を確認</summary>
+      <div class="simple-layer-group">
+        <button id="simpleLayerProduct" class="secondary" data-simple-layer="product_rgba">まつ毛の切り抜き</button>
+        <button id="simpleLayerAlpha" class="secondary" data-simple-layer="alpha">透過マスク（Alpha）</button>
+      </div>
+    </details>
+  </div>
   <div class="simple-actions">
     <a id="simpleDownload" download="composite_on_edited.png">完成画像を保存</a>
-    <button id="simpleCompare" class="secondary">AI加工済み画像と比較</button>
+    <button id="simpleCompare" class="secondary">比較モードを開く</button>
     <button id="resultOpenAdvanced" class="secondary">詳細調整を開く</button>
     <button id="simpleRestart" class="secondary">別の画像でやり直す</button>
+  </div>
+</section>
+
+<section id="compareMode" hidden>
+  <h2>まつ毛を比較</h2>
+  <p>左右それぞれのまつ毛位置を中心に、同じ段階で拡大・縮小します。</p>
+  <div class="compare-controls">
+    <button id="compareZoomOut" class="secondary" aria-label="縮小">−</button>
+    <span id="compareZoomLabel">まつ毛</span>
+    <button id="compareZoomIn" class="secondary" aria-label="拡大">＋</button>
+    <button id="compareFocus" class="secondary">まつ毛</button>
+    <button id="compareFull" class="secondary">全体</button>
+    <button id="compareClose">比較を閉じる</button>
+  </div>
+  <div class="compare-grid">
+    <figure class="compare-pane">
+      <figcaption>左：まつ毛装着後のAI画像</figcaption>
+      <canvas id="compareResultCanvas" width="720" height="520"></canvas>
+    </figure>
+    <figure class="compare-pane">
+      <figcaption>右：オリジナル装着画像</figcaption>
+      <canvas id="compareOriginalCanvas" width="720" height="520"></canvas>
+    </figure>
   </div>
 </section>
 
@@ -255,7 +310,8 @@ const state = {
   strokes: [], current: null, supabase: null, channel: null,
   zoom: 1, localUrls: {}, roiA: null, roiB: null, activeRoi: null,
   fitMode: false, fitScale: 100, fitAngle: 0, fitFlip: false,
-  productBBox: null, fitCenter: null, fitDrag: null, simpleRunning: false, simpleFocusRect: null,
+  productBBox: null, fitCenter: null, fitDrag: null, simpleRunning: false,
+  simpleFocusRect: null, sourceFocusRect: null, compareZoomLevel: 1, compareImages: {},
 };
 const TOOL_OF = { add: 'fg', unknown: 'unknown', remove: 'bg' };
 const COLOR_OF = { fg: '#ff2020', unknown: '#20c040', bg: '#2040ff' };
@@ -460,6 +516,7 @@ const simpleMode = document.getElementById('simpleMode');
 const advancedMode = document.getElementById('advancedMode');
 const workspace = document.getElementById('workspace');
 const simpleResult = document.getElementById('simpleResult');
+const compareMode = document.getElementById('compareMode');
 
 function updateSimpleRunAvailability() {
   const ready = document.getElementById('fileWith').files[0]
@@ -518,6 +575,8 @@ setupDropZone({
 
 function openAdvancedMode() {
   simpleMode.hidden = true;
+  simpleResult.hidden = true;
+  compareMode.hidden = true;
   advancedMode.hidden = false;
   workspace.hidden = false;
   document.getElementById('status').hidden = false;
@@ -533,6 +592,7 @@ document.getElementById('processOpenAdvanced').onclick = openAdvancedMode;
 document.getElementById('backToSimple').onclick = () => {
   advancedMode.hidden = true;
   simpleMode.hidden = false;
+  simpleResult.hidden = !state.simpleFocusRect;
   document.getElementById('status').hidden = true;
   document.getElementById('viewBar').hidden = true;
   workspace.hidden = simpleResult.hidden;
@@ -943,6 +1003,7 @@ async function createSession() {
   paintBackup = null;
   fitImage = null;
   state.productBBox = null;
+  state.sourceFocusRect = data.source_focus_rect || null;
   state.fitMode = false;
   resetHistory();
   pctx.clearRect(0, 0, 4096, 4096);
@@ -974,6 +1035,7 @@ async function resumeSession(sid) {
   state.roiA = data.roi_rect || null;
   state.roiB = data.dest_rect || null;
   state.productBBox = data.product_bbox || null;
+  state.sourceFocusRect = data.roi_rect || null;
   state.fitAngle = data.dest_angle || 0;
   state.fitFlip = !!data.dest_flip;
   state.fitScale = 100;
@@ -1263,10 +1325,9 @@ processModal.addEventListener('cancel', (e) => {
   if (state.simpleRunning) e.preventDefault();
 });
 
-function focusSimpleResult(focusRect) {
+function focusSimpleLayer(focusRect) {
   const valid = Array.isArray(focusRect) && focusRect.length === 4;
   const rect = valid ? focusRect : [0, 0, baseCanvas.width, baseCanvas.height];
-  state.simpleFocusRect = rect;
   const width = Math.max(1, rect[2] - rect[0]);
   const height = Math.max(1, rect[3] - rect[1]);
   // Keep the actual pixels readable, while leaving enough surrounding eye context in view.
@@ -1279,6 +1340,141 @@ function focusSimpleResult(focusRect) {
     stage.scrollTop = Math.max(0, centerY - stage.clientHeight / 2);
   });
 }
+
+function focusSimpleResult(focusRect) {
+  state.simpleFocusRect = Array.isArray(focusRect) ? focusRect : null;
+  focusSimpleLayer(focusRect);
+}
+
+async function showSimpleLayer(button) {
+  const layer = button.dataset.simpleLayer;
+  await showLayer(layer);
+  for (const item of document.querySelectorAll('[data-simple-layer]'))
+    item.classList.toggle('active', item === button);
+  if (layer === 'source_with') focusSimpleLayer(state.sourceFocusRect);
+  else if (layer === 'source_edited' || layer === 'composite_on_edited')
+    focusSimpleLayer(state.simpleFocusRect);
+  else fitZoom();
+}
+
+for (const button of document.querySelectorAll('[data-simple-layer]'))
+  button.onclick = () => showSimpleLayer(button);
+
+const COMPARE_ZOOM_STEP = 0.25;
+const compareResultCanvas = document.getElementById('compareResultCanvas');
+const compareOriginalCanvas = document.getElementById('compareOriginalCanvas');
+
+function aspectView(cx, cy, width, height, aspect) {
+  let viewWidth = width;
+  let viewHeight = height;
+  if (viewWidth / viewHeight > aspect) viewHeight = viewWidth / aspect;
+  else viewWidth = viewHeight * aspect;
+  return [cx - viewWidth / 2, cy - viewHeight / 2, cx + viewWidth / 2, cy + viewHeight / 2];
+}
+
+function comparisonView(image, focusRect, level, aspect) {
+  const full = aspectView(image.width / 2, image.height / 2, image.width, image.height, aspect);
+  const valid = Array.isArray(focusRect) && focusRect.length === 4;
+  if (!valid) return full;
+  const focusWidth = Math.max(1, focusRect[2] - focusRect[0]) * 1.15;
+  const focusHeight = Math.max(1, focusRect[3] - focusRect[1]) * 1.15;
+  const focus = aspectView(
+    (focusRect[0] + focusRect[2]) / 2,
+    (focusRect[1] + focusRect[3]) / 2,
+    focusWidth,
+    focusHeight,
+    aspect,
+  );
+  return full.map((value, index) => value + (focus[index] - value) * level);
+}
+
+function drawCompareImage(canvas, image, focusRect) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const view = comparisonView(
+    image,
+    focusRect,
+    state.compareZoomLevel,
+    canvas.width / canvas.height,
+  );
+  const viewWidth = view[2] - view[0], viewHeight = view[3] - view[1];
+  const sx0 = Math.max(0, view[0]), sy0 = Math.max(0, view[1]);
+  const sx1 = Math.min(image.width, view[2]), sy1 = Math.min(image.height, view[3]);
+  if (sx1 <= sx0 || sy1 <= sy0) return;
+  const dx = (sx0 - view[0]) / viewWidth * canvas.width;
+  const dy = (sy0 - view[1]) / viewHeight * canvas.height;
+  const dw = (sx1 - sx0) / viewWidth * canvas.width;
+  const dh = (sy1 - sy0) / viewHeight * canvas.height;
+  ctx.drawImage(image, sx0, sy0, sx1 - sx0, sy1 - sy0, dx, dy, dw, dh);
+}
+
+function updateCompareControls() {
+  const level = state.compareZoomLevel;
+  const label = level >= 1 ? 'まつ毛' : level <= 0 ? '全体' : level >= .65 ? '目元' : '顔';
+  document.getElementById('compareZoomLabel').textContent = label;
+  document.getElementById('compareZoomOut').disabled = level <= 0;
+  document.getElementById('compareZoomIn').disabled = level >= 1;
+}
+
+function drawComparison() {
+  if (!state.compareImages.result || !state.compareImages.original) return;
+  drawCompareImage(compareResultCanvas, state.compareImages.result, state.simpleFocusRect);
+  drawCompareImage(compareOriginalCanvas, state.compareImages.original, state.sourceFocusRect);
+  updateCompareControls();
+}
+
+function loadSessionImage(layer) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error(`${LAYER_NAMES[layer] || layer}を読み込めませんでした`));
+    image.src = `/api/image/${state.session}/${layer}?t=${Date.now()}`;
+  });
+}
+
+async function openComparison() {
+  state.compareZoomLevel = 1;
+  try {
+    const [result, original] = await Promise.all([
+      loadSessionImage('composite_on_edited'),
+      loadSessionImage('source_with'),
+    ]);
+    state.compareImages = { result, original };
+  } catch (e) {
+    status('比較画像の読み込みエラー: ' + e.message);
+    openAdvancedMode();
+    return;
+  }
+  simpleResult.hidden = true;
+  workspace.hidden = true;
+  compareMode.hidden = false;
+  drawComparison();
+  compareMode.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+document.getElementById('compareZoomOut').onclick = () => {
+  state.compareZoomLevel = Math.max(0, state.compareZoomLevel - COMPARE_ZOOM_STEP);
+  drawComparison();
+};
+document.getElementById('compareZoomIn').onclick = () => {
+  state.compareZoomLevel = Math.min(1, state.compareZoomLevel + COMPARE_ZOOM_STEP);
+  drawComparison();
+};
+document.getElementById('compareFocus').onclick = () => {
+  state.compareZoomLevel = 1;
+  drawComparison();
+};
+document.getElementById('compareFull').onclick = () => {
+  state.compareZoomLevel = 0;
+  drawComparison();
+};
+document.getElementById('compareClose').onclick = async () => {
+  compareMode.hidden = true;
+  simpleResult.hidden = false;
+  workspace.hidden = false;
+  await showSimpleLayer(document.getElementById('simpleLayerResult'));
+};
 
 function explainSimpleError(error) {
   const message = error.message || String(error);
@@ -1301,6 +1497,10 @@ async function runSimpleFlow() {
   }
   state.simpleRunning = true;
   updateSimpleRunAvailability();
+  state.simpleFocusRect = null;
+  state.sourceFocusRect = null;
+  state.compareImages = {};
+  compareMode.hidden = true;
   simpleResult.hidden = true;
   document.getElementById('simpleError').textContent = '';
   roiModeSelect.value = 'auto';
@@ -1354,13 +1554,9 @@ document.getElementById('processClose').onclick = () => {
   processModal.close();
   simpleResult.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
-document.getElementById('simpleCompare').onclick = async (e) => {
-  const showingResult = state.layer === 'composite_on_edited';
-  await showLayer(showingResult ? 'source_edited' : 'composite_on_edited');
-  if (!showingResult) focusSimpleResult(state.simpleFocusRect);
-  e.target.textContent = showingResult ? '完成画像に戻る' : 'AI加工済み画像と比較';
-};
+document.getElementById('simpleCompare').onclick = openComparison;
 document.getElementById('simpleRestart').onclick = () => {
+  compareMode.hidden = true;
   simpleResult.hidden = true;
   workspace.hidden = true;
   simpleMode.scrollIntoView({ behavior: 'smooth', block: 'start' });

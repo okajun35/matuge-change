@@ -113,6 +113,7 @@ class SessionService:
             "height": roi_a.shape[0],
             "has_bare": roi_b is not None,
             "mode": "manual" if manual else "auto",
+            "source_focus_rect": [roi.x0, roi.y0, roi.x1, roi.y1],
             "layers": layers,
         }
 

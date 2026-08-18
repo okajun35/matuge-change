@@ -22,6 +22,11 @@ def face_image() -> np.ndarray:
 
 
 class TestSourcePersistence:
+    def test_create_reports_the_original_eye_area_for_comparison_focus(self, service, face_image):
+        result = service.create(face_image, None)
+
+        assert result["source_focus_rect"] == service.store.load_meta(result["session_id"])["roi"]
+
     def test_worn_image_is_kept(self, service, face_image):
         sid = service.create(face_image, None)["session_id"]
         assert service.store.has_layer(sid, "source_with")

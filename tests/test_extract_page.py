@@ -90,6 +90,47 @@ class TestSimpleMode:
         assert "const recomposeResult = await recompose();" in flow
         assert "focusSimpleResult(recomposeResult.focus_rect);" in flow
 
+    def test_simple_layers_prioritize_the_three_user_images_then_extraction_outputs(self):
+        page = _page()
+        primary = (
+            ("simpleLayerOriginal", "装着画像（元）"),
+            ("simpleLayerEdited", "AI加工済み画像"),
+            ("simpleLayerResult", "合成結果"),
+        )
+        positions = []
+        for marker, label in primary:
+            assert f'id="{marker}"' in page
+            assert label in page
+            positions.append(page.index(f'id="{marker}"'))
+        assert positions == sorted(positions)
+        assert 'id="simpleExtractionLayers"' in page
+        assert "まつ毛の切り抜き" in page
+        assert "透過マスク（Alpha）" in page
+
+    def test_comparison_places_result_left_and_original_right(self):
+        page = _page()
+        assert 'id="compareMode" hidden' in page
+        left = page.index('id="compareResultCanvas"')
+        right = page.index('id="compareOriginalCanvas"')
+        assert left < right
+        assert "左：まつ毛装着後のAI画像" in page
+        assert "右：オリジナル装着画像" in page
+
+    def test_comparison_starts_on_lashes_and_minus_moves_toward_the_whole_image(self):
+        page = _page()
+        assert "compareZoomLevel: 1" in page
+        assert "state.compareZoomLevel - COMPARE_ZOOM_STEP" in page
+        assert "state.compareZoomLevel = 0" in page
+        assert "state.compareZoomLevel = 1" in page
+        assert "sourceFocusRect" in page and "simpleFocusRect" in page
+        assert "drawComparison()" in page
+
+    def test_comparison_can_stack_at_the_device_width_on_mobile(self):
+        page = _page()
+        assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in page
+        assert "@media (max-width: 700px)" in page
+        assert ".compare-grid { grid-template-columns: 1fr; }" in page
+
 
 class TestLocalPreview:
     def test_file_inputs_trigger_preview_before_analysis(self):
