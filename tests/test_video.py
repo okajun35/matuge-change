@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import video
+from backend.api import video_routes
 from backend.app import DATA_DIR, app
 
 client = TestClient(app)
@@ -118,6 +119,71 @@ class TestWarpEditedToFrame:
         assert warped[200, 100].max() == 0
 
 
+def similarity_matrix(tx: float = 0.0, ty: float = 0.0, angle: float = 0.0, scale: float = 1.0) -> np.ndarray:
+    cosine = scale * np.cos(angle)
+    sine = scale * np.sin(angle)
+    return np.array([[cosine, -sine, tx], [sine, cosine, ty]], dtype=np.float64)
+
+
+class TestSimilarityTransformStabilization:
+    def test_matrix_parameters_round_trip(self):
+        matrix = similarity_matrix(tx=12.5, ty=-8.0, angle=np.deg2rad(20), scale=1.15)
+        params = video.similarity_parameters(matrix)
+        rebuilt = video.similarity_matrix(params)
+        assert rebuilt == pytest.approx(matrix, abs=1e-8)
+
+    def test_interpolates_internal_and_edge_missing_transforms(self):
+        transforms = [None, similarity_matrix(tx=10), None, similarity_matrix(tx=30), None]
+        filled = video.interpolate_similarity_transforms(transforms)
+        assert [matrix[0, 2] for matrix in filled] == pytest.approx([10, 10, 20, 30, 30])
+
+    def test_stabilization_reduces_stationary_translation_jitter(self):
+        transforms = [similarity_matrix(tx=value) for value in (0, 2, -2, 2, -2, 2, -2, 0)]
+        stabilized = video.stabilize_similarity_transforms(transforms, fps=30)
+        raw_tx = np.array([matrix[0, 2] for matrix in transforms])
+        stable_tx = np.array([matrix[0, 2] for matrix in stabilized])
+        assert stable_tx.var() < raw_tx.var() * 0.4
+
+    def test_stabilization_keeps_constant_velocity_motion(self):
+        transforms = [similarity_matrix(tx=float(value)) for value in range(0, 80, 10)]
+        stabilized = video.stabilize_similarity_transforms(transforms, fps=30)
+        stable_tx = np.array([matrix[0, 2] for matrix in stabilized])
+        assert np.diff(stable_tx[2:-2]) == pytest.approx(np.full(3, 10.0), abs=1e-6)
+
+    def test_stabilization_never_lags_real_translation_by_more_than_two_pixels(self):
+        transforms = [similarity_matrix(tx=value) for value in (0, 0, 0, 30, 60, 60, 60)]
+        stabilized = video.stabilize_similarity_transforms(transforms, fps=30)
+        raw_tx = np.array([matrix[0, 2] for matrix in transforms])
+        stable_tx = np.array([matrix[0, 2] for matrix in stabilized])
+        assert np.max(np.abs(raw_tx - stable_tx)) <= 2.0
+
+    def test_stabilization_bounds_rotation_and_scale_correction(self):
+        transforms = [
+            similarity_matrix(angle=np.deg2rad(angle), scale=scale)
+            for angle, scale in ((0, 1), (0, 1), (8, 1.08), (16, 1.16), (16, 1.16))
+        ]
+        stabilized = video.stabilize_similarity_transforms(transforms, fps=30)
+        raw = np.array([video.similarity_parameters(matrix) for matrix in transforms])
+        stable = np.array([video.similarity_parameters(matrix) for matrix in stabilized])
+        assert np.max(np.abs(raw[:, 2] - stable[:, 2])) <= np.deg2rad(0.5) + 1e-12
+        assert np.max(np.abs(raw[:, 3] - stable[:, 3])) <= np.log(1.005) + 1e-12
+
+    def test_stabilization_keeps_face_anchor_fixed_while_smoothing_rotation(self):
+        anchor = np.array([500.0, 1000.0])
+        transforms = []
+        for angle in np.deg2rad([0, 2, -2, 2, -2, 0]):
+            matrix = similarity_matrix(angle=angle)
+            matrix[:, 2] = anchor - matrix[:, :2] @ anchor
+            transforms.append(matrix)
+
+        stabilized = video.stabilize_similarity_transforms(transforms, fps=30, anchor=anchor)
+
+        stable_anchor = np.array(
+            [video.transform_landmarks(anchor[None], matrix)[0] for matrix in stabilized]
+        )
+        assert stable_anchor == pytest.approx(np.tile(anchor, (len(transforms), 1)), abs=1e-8)
+
+
 class TestComposeFrames:
     def test_eye_region_from_frame_rest_from_edited(self):
         lms = make_landmarks(0.5)
@@ -133,6 +199,45 @@ class TestComposeFrames:
         edited = np.full((400, 400, 3), 50, np.uint8)
         outs = video.compose_frames([frame, frame], [lms, None], edited, lms)
         assert (outs[0] == outs[1]).all()
+
+    def test_estimates_one_transform_per_detected_frame(self, monkeypatch):
+        lms = make_landmarks(0.5)
+        frame = np.full((400, 400, 3), 200, np.uint8)
+        edited = np.full((400, 400, 3), 50, np.uint8)
+        calls = 0
+        real_estimate = cv2.estimateAffinePartial2D
+
+        def counted_estimate(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return real_estimate(*args, **kwargs)
+
+        monkeypatch.setattr(video.cv2, "estimateAffinePartial2D", counted_estimate)
+        video.compose_frames([frame, frame, frame], [lms, None, lms], edited, lms)
+        assert calls == 2
+
+    def test_mask_landmarks_use_the_same_transform_as_edited_image(self, monkeypatch):
+        lms_edited = make_landmarks(0.5)
+        lms_frame = lms_edited + [10.0, 0.0]
+        frame = np.full((400, 400, 3), 200, np.uint8)
+        edited = np.full((400, 400, 3), 50, np.uint8)
+        matrices = []
+        mask_landmarks = []
+
+        def capture_warp(_edited, matrix, shape):
+            matrices.append(matrix.copy())
+            return np.zeros(shape, np.uint8)
+
+        def capture_mask(shape, landmarks, _expand):
+            mask_landmarks.append(landmarks.copy())
+            return np.zeros(shape[:2], np.float64)
+
+        monkeypatch.setattr(video, "warp_edited_with_transform", capture_warp)
+        monkeypatch.setattr(video, "eye_region_mask", capture_mask)
+        video.compose_frames([frame, frame], [lms_edited, lms_frame], edited, lms_edited)
+
+        for landmarks, matrix in zip(mask_landmarks, matrices, strict=True):
+            assert landmarks == pytest.approx(video.transform_landmarks(lms_edited, matrix))
 
 
 class TestVideoRoundtrip:
@@ -241,6 +346,72 @@ class TestVideoComposeApi:
         assert res.status_code == 422
         assert "no face" in res.json()["detail"]
 
+    def test_corrupt_persisted_frame_returns_clear_error(self, fake_video_session, monkeypatch):
+        frame_path = os.path.join(DATA_DIR, fake_video_session, "frames", "000002.png")
+        with open(frame_path, "wb") as frame_file:
+            frame_file.write(b"corrupt")
+        monkeypatch.setattr(video_routes, "detect_landmarks", lambda _image: make_landmarks(0.5))
+
+        res = client.post(
+            "/api/video/compose",
+            data={"session_id": fake_video_session},
+            files={"edited_image": ("e.png", encode_png(np.zeros((400, 400, 3), np.uint8)))},
+        )
+
+        assert res.status_code == 400
+        assert "could not read persisted video frame 2" in res.json()["detail"]
+
+
+class TestVideoJobApi:
+    @pytest.mark.parametrize("expand", [-0.01, 1.01])
+    def test_rejects_expand_outside_supported_range(self, expand):
+        res = client.post(
+            "/api/video/jobs",
+            data={"expand": str(expand)},
+            files={"video": ("a.mp4", b"not decoded because validation runs first")},
+        )
+        assert res.status_code == 422
+
+    def test_initial_job_closure_does_not_retain_decoded_edited_image(self, monkeypatch):
+        captured = {}
+
+        def capture_submit(session_id, work):
+            captured["session_id"] = session_id
+            captured["work"] = work
+            return "job-id"
+
+        monkeypatch.setattr(video_routes.video_jobs, "submit", capture_submit)
+        res = client.post(
+            "/api/video/jobs",
+            files={
+                "video": ("a.mp4", b"queued video"),
+                "edited_image": ("e.png", encode_png(np.zeros((400, 400, 3), np.uint8))),
+            },
+        )
+        try:
+            assert res.status_code == 202
+            closure_values = [cell.cell_contents for cell in captured["work"].__closure__ or ()]
+            assert not any(isinstance(value, np.ndarray) for value in closure_values)
+        finally:
+            shutil.rmtree(os.path.join(DATA_DIR, captured["session_id"]), ignore_errors=True)
+
+    def test_compose_job_closure_does_not_retain_decoded_edited_image(self, fake_video_session, monkeypatch):
+        captured = {}
+
+        def capture_submit(_session_id, work):
+            captured["work"] = work
+            return "job-id"
+
+        monkeypatch.setattr(video_routes.video_jobs, "submit", capture_submit)
+        res = client.post(
+            f"/api/video/{fake_video_session}/compose/jobs",
+            files={"edited_image": ("e.png", encode_png(np.zeros((400, 400, 3), np.uint8)))},
+        )
+
+        assert res.status_code == 202
+        closure_values = [cell.cell_contents for cell in captured["work"].__closure__ or ()]
+        assert not any(isinstance(value, np.ndarray) for value in closure_values)
+
 
 class TestVideoServing:
     def test_output_not_ready_returns_404(self, fake_video_session):
@@ -258,3 +429,11 @@ class TestVideoServing:
     def test_bad_name_returns_400(self, fake_video_session):
         res = client.get(f"/api/video/{fake_video_session}/bad-name!")
         assert res.status_code == 400
+
+
+class TestVideoPage:
+    def test_has_drop_inputs_progress_modal_and_video_job_api(self):
+        res = client.get("/video.html")
+        assert res.status_code == 200
+        for marker in ("dropVideo", "dropVideoEdited", "videoProcessModal", "/api/video/jobs"):
+            assert marker in res.text

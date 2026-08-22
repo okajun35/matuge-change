@@ -299,7 +299,7 @@ class TestPages:
     def test_video_page_has_video_mode_controls(self):
         res = client.get("/video.html")
         assert res.status_code == 200
-        for marker in ("fileVideo", "btnCompose", "/api/video/session", "/api/video/compose"):
+        for marker in ("fileVideo", "btnVideoRun", "dropVideoEdited", "/api/video/jobs"):
             assert marker in res.text
         assert "btnMatte" not in res.text
 
