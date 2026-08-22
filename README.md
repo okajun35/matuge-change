@@ -1,464 +1,130 @@
+[English](README.md) | [日本語](README.ja.md)
+
 # matuge-change
 
-商品まつ毛保持型 AIモデル画像・動画加工システムの PoC。
+**Keep the product. Change only the person.**
 
-生成AIによる人物変更で商品まで描き変わってしまう問題に対し、
-静止画では Alpha Matting による商品外観の抽出・再合成、
-動画では元フレームの目元領域保持によって、
-実物の商品外観をできるだけ維持することを目指す。
+Matsuge Change is a proof-of-concept web application for e-commerce sellers. It transforms the person in
+photos and videos into an AI model while preserving the appearance of the false-eyelash product they are
+actually wearing as faithfully as possible.
 
-## デモ動画
+- [Demo video (YouTube)](https://www.youtube.com/watch?v=hN2X6LOEeXA)
+- [Live demo](https://matuge-change.onrender.com/)
+- [Project background (Japanese)](docs/project-background.md)
 
-つけまつげ着用動画から、AI モデルへ変更した完成動画のデモ:
-https://www.youtube.com/watch?v=hN2X6LOEeXA
+## The problem
 
-## プロジェクト概要
+The appearance of false eyelashes depends on their length, clusters, spacing, curl, outer-corner spread,
+and placement on the eye. An e-commerce image must show the product actually being sold, not merely a
+similar-looking alternative.
 
-### 1. 作りたいもの
+However, when generative AI changes the person wearing the product, it may regenerate the eye area as well
+and replace the product lashes with a different design.
 
-**EC販売者向けに、商品の着用画像からAIモデルの商品紹介動画を簡単に作れるWebアプリです。**
+![Generative AI changes the product lashes while changing the person](img/problem-generative-ai-changes-product.png)
 
-販売者本人やスタッフなどが、実際の商品を着用して撮影した画像を素材として使用します。
-
-その画像から、**着用している商品そのものの見た目をできるだけ維持したまま、着用人物だけをAIモデルへ変更**し、さらにその画像をもとに短い商品紹介動画を生成します。
-
-#### コンセプト
-
-> **「商品はそのまま、人だけAIモデルへ。」**
-
-AIで商品そのものを新しく生成するのではなく、実際に販売している商品の着用状態を基準として、人物部分をAIモデルへ置き換えることを目指します。
-
-### 2. 解決したい課題
-
-AmazonなどのECモールで商品を販売する際、商品単体の画像だけではなく、
-
-- 実際に商品を着用した状態
-- 使用したときの見え方
-- 動きのある商品紹介動画
-
-などを見せることで、購入者に商品の特徴をより分かりやすく伝えることができる。
-
-一方で、着用画像や動画を制作するためには、
-
-- モデルの手配
-- 撮影
-- 撮影場所の準備
-- 動画制作・編集
-
-などが必要になり、小規模なEC販売者にとっては時間・費用・手間が大きな負担になる。
-
-この課題は、実際にAmazon JPで自己ブランドのつけまつげを販売する中で感じてきたもの。
-
-そこで、
-
-**販売者自身が商品を着用してスマートフォンなどで撮影するだけで、AIモデルによる商品紹介画像・動画を作れる仕組み**
-
-を目指す。
-
-#### なぜ、つけまつげには「着用画像」が重要なのか
-
-Amazonで商品を販売する場合、購入者は主に商品画像・動画・商品説明文などを見て、実物を手に取ることなく購入を判断する。
-
-特につけまつげは、
-
-- 毛の長さ
-- 毛束の形
-- ボリューム
-- カール
-- 目尻側の広がり
-- 実際に目元へ装着したときの印象
-
-などによって、見え方が大きく変わる商品である。
-
-商品単体の写真だけを見ても、**「自分が着けたらどのような印象になるのか」** を購入前に想像することは簡単ではない。
-
-そのため、実際の商品を装着した画像や動画は、商品の特徴を購入者へ伝えるうえで重要なコンテンツになる。
-
-#### しかし、着用画像を作ること自体が難しかった
-
-実際に着用画像を増やそうとすると、撮影にはさまざまな問題があった。
-
-まず、目元の撮影を専門とするパーツモデルへ依頼する方法を検討したが、継続的に複数の商品を撮影するにはモデルへの報酬が大きな負担になる。
-
-そこで、より一般の人に近いモデルを募集し、自分で撮影することも検討した。
-
-しかしこの方法でも、
-
-- モデルとの日程調整
-- 撮影場所の確保
-- 照明など撮影環境の準備
-- 撮影そのものにかかる時間
-- 商品ごとの撮り直し
-
-などが必要になる。
-
-さらに、モデル自身に商品を送り、自宅でスマートフォンを使って自撮りしてもらう方法も考えた。
-
-この方法なら撮影コストを下げられるが、今度は撮影環境や撮影技術を一定の品質に揃えることが難しいという問題がある。
-
-照明、カメラとの距離、顔の角度、ピント、画質などが人によって異なれば、ECの商品画像として統一された素材を作ることが難しくなる。
-
-#### そこで生成AIを使ってみた
-
-次に試したのが、生成AIによる人物変更。
-
-販売者やスタッフなどが実際の商品を装着した写真を撮影し、
-
-> 「商品はそのままにして、着用している人物だけをAIモデルへ変更する」
-
-ことができれば、モデル撮影の問題を大きく減らせるのではないかと考えた。
-
-実際に生成AIを使用すると、人物そのものを別のAIモデルへ変更することはできる。
-
-しかし、EC用途では大きな問題が発生した。
-
-#### 人物だけではなく、「商品」まで生成AIが変えてしまう
-
-人物をAIモデルへ変更すると、目元も再生成され、その際に実際に装着していたつけまつげまで別の形に変化してしまうことがある。
-
-例えば、
-
-- まつげの長さが変わる
-- 毛束の本数や密度が変わる
-- カールの強さが変わる
-- 毛先の方向が変わる
-- 目尻側のボリュームが変わる
-- 元の商品には存在しない毛が生成される
-
-といった変化が起こる。
-
-![生成AIで人物を変更すると、まつ毛（商品）まで変わってしまう](img/problem-generative-ai-changes-product.png)
-
-見た目としては自然で美しい画像が生成されたとしても、そこに写っているつけまつげが、実際に販売している商品と異なるのであれば、ECの商品画像として使用することはできない。
-
-元の着用写真（実物のつけまつげを装着）:
-
-![元の着用写真](img/original-bustup.jpg)
-
-生成AIで人物をAIモデルへ変更した結果（着用しているつけまつげも別の形に変わってしまっている）:
-
-![生成AIで人物を変更した結果](img/ai-model-bustup.png)
-
-![つけまつげ着用画像の人物だけをAIで変更した結果（一番左：変更前／右3枚：AIによる人物変更後）](img/ai-change-comparison-1.png)
-
-![目元を拡大して比較](img/ai-change-comparison-2.png)
-
-#### ECでは「似ている商品」では不十分
-
-これは単なる画像生成の精度の問題ではない。
-
-ECの商品画像は、購入者が商品を選ぶための情報である。
-
-実際の商品とは異なる長さ、ボリューム、カールなどを持つつけまつげを着用画像として掲載すると、購入者はその画像を見て商品を購入することになる。
-
-そして実際の商品が届いたとき、
-
-> 「商品ページで見た着用イメージと違う」
-
-という結果になれば、
-
-- 返品
-- クレーム
-- 低評価レビュー
-- ショップ評価の低下
-- 販売プラットフォームからの信頼低下
-
-などにつながる可能性がある。
-
-そのため、単に生成AIで魅力的な着用画像を作るだけでは、この問題を解決できなかった。
-
-#### そこで Matsuge Change を作る
-
-必要なのは、
-
-「つけまつげを着けたAIモデルを生成する」ことではない。
-
-必要なのは、
-
-**実際に販売している商品を維持したまま、着用している人物だけを変更すること。**
-
-そこで Matsuge Change では、元の着用画像から実際の商品であるつけまつげを抽出・保持し、人物をAIモデルへ変更した画像に対して、その商品を再合成する仕組みを目指す。
-
-コンセプトはシンプル。
-
-> **商品はそのまま、人だけAIモデルへ。**
-
-AIによって人物表現を変えるメリットを活用しながら、ECで最も重要な **「販売している商品そのものを正しく見せる」** ことを維持することが、このプロジェクトの中心テーマとなる。
-
-実際に Matsuge Change を用いて変更した結果:
-
-![Matsuge Change を用いて変更した結果（バストアップ画像1）](img/matsuge-change-bustup-1.png)
-
-![Matsuge Change を用いて変更した結果（バストアップ画像2）](img/matsuge-change-bustup-2.png)
-
-![Matsuge Change を用いて変更した結果（バストアップ画像3）](img/matsuge-change-bustup-3.png)
-
-![Matsuge Change を用いて変更した結果（目元画像1）](img/matsuge-change-eye-1.png)
-
-![Matsuge Change を用いて変更した結果（目元画像2）](img/matsuge-change-eye-2.png)
-
-### 3. 今回の対象商品
-
-今回のハッカソンでは対象を広げず、**つけまつげ1種類**に絞って実装・検証します。
-
-対象商品（実際に Amazon で販売中）: https://www.amazon.co.jp/dp/B0GFJSHBWT
-
-実際にECで販売している商品を使用し、
-
-- 実物の商品
-- 商品画像
-- 実際の着用画像
-
-を用いて検証します。
-
-![対象商品のつけまつげ（実物）](img/shop-example.png)
-
-毛足が長く細い毛先が多数あるダンス・ステージ用途の商品で、画像処理としては難しい条件になる
-（詳細は [docs/static-image-algorithm.md](docs/static-image-algorithm.md)「対象物としての難しさ」）。
-
-まずは1商品で、**実際の商品をどこまで維持しながら人物だけを変更できるか**を重視します。
-
-### 4. 最も重要な要件
-
-このプロジェクトで最も重要なのは、
-
-> ### **人物は変えても、商品は変えない**
-
-という点です。
-
-目的は、AIで単に「つけまつげを着けたAI美女」を生成することではありません。
-
-元の着用画像に写っている**実際に販売する特定の商品**について、可能な限りその特徴を維持する必要があります。
-
-つけまつげの場合、特に以下の要素を重要視します。
-
-- まつげの長さ
-- 毛束の形
-- 毛束の間隔
-- ボリューム
-- カール
-- 毛先の方向
-- 目元への装着位置
-- 着用したときの全体的な見え方
-
-AIモデルへ人物を変更した結果、元の商品とは異なる「似たような別のつけまつげ」が生成されてしまうと、ECの商品紹介素材として正確ではありません。
-
-そのため本プロジェクトでは、**人物の美しさや生成画像としての完成度だけを追求するのではなく、商品の再現性を優先します。**
-
-### 5. 目指す体験
-
-最終的には、EC販売者が難しい画像編集や動画制作を意識することなく、
-
-**商品を着用する → 撮影する → AIモデルを選ぶ → 商品紹介素材ができる**
-
-というシンプルな流れで利用できることを目指します。
-
-今回のハッカソンでは、その中でも特に、
-
-**「実際の商品を維持したまま、着用人物をAIモデルへ変更できるか」**
-
-というコア部分の実現と検証に取り組みます。
-
-## なぜ商品を生成AIに任せないのか
-
-生成AIに「商品は変更しないで」と指示することはできますが、
-出力された商品が元画像と同一であることを保証することはできません。
-
-ECの商品画像では、「似た商品」ではなく、
-**実際に販売する商品の形状・毛束・長さ・カール・装着状態を維持すること**が重要です。
-
-そこで本プロジェクトでは、
-
-> **「生成AIに商品を正しく描かせる」のではなく、
-> 「商品を生成AIの処理対象から外す」**
-
-という設計を採用しています。
-
-商品領域は元画像・元動画から抽出または保持し、
-生成AIには人物側の加工を担当させ、
-最後に商品を画像処理で再合成します。
+Matsuge Change therefore separates the product region from the generative-AI process instead of asking the
+model to reproduce the product correctly.
 
 ```text
-元画像 / 元動画
+Source image / video
    │
-   ├─ 商品領域 ──────────────┐
-   │      抽出・保持          │
-   │                         │
-   └─ 人物領域               │
-          ↓                  │
-       生成AIで加工           │
-          ↓                  │
-          └──────────────→ 再合成
+   ├─ Product region ─────────────┐
+   │      extract / preserve      │
+   │                              │
+   └─ Person region               │
+          ↓                       │
+       Edit with generative AI    │
+          ↓                       │
+          └───────────────────→ Recompose
 ```
 
-この設計では、生成AIの自由度と、商品の同一性・再現性をできるだけ分離します。
+Asking a general-purpose image generation model to cut out the lashes directly produced a regenerated
+product rather than a segmentation result. The actual output and failure analysis are documented in
+[Failure case: asking generative AI to perform the cut-out (Japanese)](docs/generative-ai-cutout-failure.md).
 
-なお、本システムは「AIを使わない画像処理」ではありません。
-顔・目元の位置推定には MediaPipe Face Landmarker の機械学習モデルを利用します。
-一方で、**商品まつ毛そのものを生成AIに再生成させることは避ける**、というのが設計上の中心方針です。
+## How it works
 
-詳細は [docs/design-philosophy.md](docs/design-philosophy.md) を参照。
+Still images and videos use different preservation strategies because video must remain temporally stable
+and follow blinking.
 
-## 商品保持の考え方（Generative Product Preserve）
+| Mode | Product-preservation method | Output |
+| --- | --- | --- |
+| Still image | Extract an alpha matte from the eye ROI, then place it on the AI-edited image using only a similarity transform and alpha compositing | PNG |
+| Video | Preserve each source frame's eye region and align the AI-edited image to the tracked face | MP4 |
 
-本プロジェクトの不変の目標は「商品を生成AIに描き直させない」こと。
-商品領域には、実物の着用画像・動画に由来する情報を使用する。
-生成AIによる商品まつ毛の再生成は行わない
+### Still images
 
-- 動画モード: 元フレームの目元領域をそのまま貼り戻す（幾何変換はAI加工画像側にのみ掛ける）。
-  合成段階では商品ピクセルは無変形で、劣化は境界のフェザー帯と出力の再エンコードに限られる。
-- 静止画モード: 抽出した商品領域を相似変換（移動・縦横比固定の拡縮・回転・反転）＋補間で貼る。
-  形状（長さ・毛束・間隔・カール・毛先方向）と縦横比は保持するが、Matting の前景色推定と
-  補間リサンプルを通るため、元画像とピクセル単位で一致するわけではない。
-  自由変形・パースペクティブ・生成AIによる描き直しは行わない。
-
-## 静止画 / 動画モードの技術構成
-
-本プロジェクトでは、静止画と動画で同じ抽出方式を使っていない。
-
-静止画は **商品まつ毛を Alpha Matte として抽出して再合成**する。一方、動画はフレームごとの Alpha 抽出によるちらつきと、まばたき時の形状変化を避けるため、**元動画の目元領域をまるごと残して AI 加工画像側を動かす**方式を採用している。
-
-また、本システムは「AIを使わない画像処理」ではない。顔・目元の検出には **MediaPipe Face Landmarker** の機械学習モデルを利用する。一方で、商品まつ毛専用の学習済みセグメンテーションモデルや、生成AIによる商品まつ毛の再生成は行わない。
-
-### 技術比較
-
-| 技術 / 処理 | 静止画 | 動画 | 用途 |
-| --- | :---: | :---: | --- |
-| MediaPipe Face Landmarker | ○ | ○ | 顔・目ランドマーク検出 |
-| 目元 ROI 自動生成 | ○ | ○ | 処理対象を目周辺へ限定 |
-| Landmark Affine | ○ | ○ | 顔位置の対応付け |
-| ECC alignment | ○ | × | 静止画の装着 / 未装着画像の微調整 |
-| Difference Map | ○ | × | 装着前後の見た目の変化を抽出 |
-| Darkening / Chroma / Gradient Evidence | ○ | × | まつ毛候補の推定 |
-| Eye Prior | ○ | × | 目周辺の候補を優先 |
-| Probability Map | ○ | × | 商品候補確率 |
-| 3値ブラシ補正 | ○ | × | FG / Unknown / BG の手動補正 |
-| Trimap | ○ | × | Matting 用3値マスク |
-| PyMatting | ○ | × | Alpha / Foreground RGB 推定 |
-| Product RGBA | ○ | × | 抽出した商品まつ毛レイヤー |
-| 目元領域 Soft Mask | × | ○ | 元動画の目元全体を保持 |
-| 元商品側の warp | ○ 相似変換のみ | × | 動画では商品側を変形しない |
-| AI 加工画像側の warp | × | ○ | 各動画フレームの顔位置へ合わせる |
-| Alpha Blend | ○ | ○ | 最終合成 |
-| まばたき追従 | △ | ○ | 動画は元フレーム自体を使う |
-| H.264 再エンコード | × | ○ | MP4 出力 |
-
-### 静止画モードの処理
-
-静止画では、装着画像と任意の未装着画像から目元を抽出し、画像差分と目位置の prior を使って商品候補を推定する。
+The user supplies a photo with the product attached and an AI-edited photo. Face landmarks, evidence maps,
+a trimap, and closed-form alpha matting produce the Product RGBA layer. A three-state brush—product,
+unknown, and background—can correct automatic extraction. Side profiles and close-ups can use manual ROIs.
 
 ```text
-MediaPipe Face Landmarker
-        ↓
-左右の目ランドマーク
-        ↓
-目元 ROI
-        ↓
-Landmark Affine + ECC
-        ↓
-Evidence Map
-暗化 60% + 色差 15% + エッジ差 25%
-        ×
-Eye Prior
-        ↓
-Probability Map
-        ↓
-Trimap
-        ↓
-Closed-form Alpha Matting
-        ↓
-Product RGBA
-        ↓
-AI加工済み画像へ相似変換 + Alpha Blend
+Product photo → Eye ROI → Evidence → Trimap → Alpha Matting
+                                                  ↓
+AI-edited photo ← Similarity transform + alpha ← Product RGBA
 ```
 
-未装着画像がない場合は、局所暗部を Evidence とするフォールバック経路を使う。
+![Generate a trimap and extract the product lashes](img/static-1-input-trimap-extract.png)
 
-![入力画像から顔ランドマークで trimap を生成し、まつ毛を抽出する](img/static-1-input-trimap-extract.png)
+![Recompose the extracted product lashes onto the AI-edited image](img/static-2-fitting-recompose.png)
 
-![抽出したまつ毛を AI 加工画像へフィッティングして再合成する](img/static-2-fitting-recompose.png)
+Details: [Still-image algorithm (Japanese)](docs/static-image-algorithm.md) /
+[Simple-mode specification (Japanese)](docs/static-image-simple-mode.md)
 
-![再合成前後の比較画像](img/static-3-comparison.png)
+### Video
 
-詳細: [docs/static-image-algorithm.md](docs/static-image-algorithm.md)
-
-### 動画モードの処理
-
-動画では、まつ毛だけを毎フレーム抽出しない。フレームごとの Alpha 推定はちらつきや、まばたき時の誤差を起こしやすいため、元動画の **目元領域（まつ毛・まぶた・目・まばたきの動き）をそのまま再利用**する。
+The system selects the sharpest frame with the most open eyes. That one frame is edited with an external
+AI service. For every output frame, the AI-edited image follows the tracked face while the original eye
+region—including lashes, eyelids, and blinking—is composited back. Independent per-frame alpha extraction
+is deliberately avoided because it flickers.
 
 ```text
-元動画
-  ↓
-フレーム分解 + 全フレーム顔ランドマーク
-  ↓
-ベストフレーム選択
-sharpness 50% + eye openness 50%
-  ↓
-ベストフレームを外部生成AIで人物加工
-  ↓
-各フレーム:
-  AI加工画像を Landmark Affine で
-  元フレームの顔位置へ warp
-  ↓
-元フレームの目元 Soft Mask を上から貼り戻す
-  ↓
-H.264 / yuv420p で MP4 出力
+Source video → Select best frame → Edit person with external AI
+      ↓                                ↓
+Eye region from each frame ─────→ Face tracking + composite → MP4
 ```
 
-動画側では、商品を含む元目元領域には幾何変換を掛けない。変形するのは AI 加工済み画像側だけである。
+Details: [Video algorithm (Japanese)](docs/video-algorithm.md) /
+[Video design decisions (Japanese)](docs/video-approach.md)
 
-詳細: [docs/video-algorithm.md](docs/video-algorithm.md)
+## Product-preservation definition
 
-### Generative Product Preserve の意味
+In this project, **Generative Product Preserve** means that generative AI does not redraw the false-eyelash
+product. Instead, the system reuses the product appearance derived from the real source image as faithfully
+as practical.
 
-本プロジェクトで保証しようとしているのは、**商品を生成AIに描き直させないこと**である。
+- Still-image product layers may only undergo a similarity transform: translation, uniform scaling,
+  rotation, and reflection
+- Free-form deformation, perspective transforms, non-similarity warps, and generative product completion
+  are not allowed
+- In video, the source eye region containing the product is not geometrically transformed; only the
+  AI-edited image is warped
+- MediaPipe Face Landmarker is used to detect the face and eyes
+- Still images pass through foreground estimation and interpolation; videos pass through boundary
+  feathering and H.264 re-encoding
+- The final output is therefore not guaranteed to match the source image pixel for pixel
 
-「AIを使っていない」「元画像とピクセル単位で完全一致する」という意味ではない。
+See [Design philosophy (Japanese)](docs/design-philosophy.md) for the precise guarantees and rationale.
 
-- MediaPipe Face Landmarker は機械学習モデル
-- 静止画は Matting の Foreground 推定と補間を通る
-- 動画は境界 feather と H.264 再エンコードを通る
-- 静止画の再合成では相似変換による補間が入る
-- 動画では元の目元コア領域を無変形で使うが、最終 MP4 では圧縮劣化がある
+## Current capabilities
 
-そのため、「生成AIに商品を再生成させず、実物画像由来の商品外観を可能な限り保持して再利用する」という意味での保持を目標とする。
+- Simple still-image workflow from the product photo and AI-edited photo through extraction and recomposition
+- Automatic landmark-based ROIs and manual ROIs for side profiles and close-ups
+- Diagnostic layers including Probability, Trimap, Alpha, and Product RGBA
+- Three-state brush, undo/redo, thresholds, and similarity-transform adjustments
+- Persistent sessions and processing history
+- Catalog registration and shape-similarity search for extracted product lashes
+- Video best-frame selection, face tracking, eye-region preservation, and MP4 output
+- Local persistence with optional Supabase integration
+- Regression measurement with a Synthetic Benchmark
 
-## PoC の範囲 (Phase 1–2)
+The PoC deliberately targets [one false-eyelash product currently sold on Amazon Japan](https://www.amazon.co.jp/dp/B0GFJSHBWT).
 
-- 装着画像（＋任意で未装着画像）から目元 ROI を自動検出
-- 未装着画像がある場合: 位置合わせ（Landmark Affine + ECC）→ Difference Map
-- 未装着画像がない場合: 局所暗部検出によるフォールバック
-- 初期 Probability 推定 → ユーザーがブラシ（＋商品 / ？中間 / −背景）で補正
-- Soft Trimap → Closed-form Alpha Matting + Foreground 推定 (pymatting)
-- Product RGBA 出力・未装着画像への再合成・再合成誤差の表示
-- 抽出済みまつ毛の AI 編集済み画像への再合成（Landmark ベース位置合わせ + Alpha 合成）
-- 抽出済み商品まつ毛のカタログ登録と形状類似検索（64 次元記述子 / pgvector）
-- Matting の非同期ジョブ化と進捗表示（Supabase Realtime、未設定時はポーリング）
-- ブラシストロークのベクタ保存とセッション再開
+## Quick start
 
-詳細は [docs/supabase-phase-b.md](docs/supabase-phase-b.md)。
-
-アップロードした元画像・AI 加工済み画像・合成結果と Matting 実行履歴（`runs.json`）は
-セッションディレクトリに残る（[docs/session-provenance.md](docs/session-provenance.md)）。
-
-## 動画モード
-
-顔固定・まばたき動画向けの「目元領域まるごと差し替え方式」（[docs/video-approach.md](docs/video-approach.md)）。
-
-- 動画をフレーム分解し、目が開いていて鮮明なベストフレームを選択・出力
-- ベストフレームを外部 AI で加工（目元は変えないことを推奨）してアップロード
-- 各フレームへ AI 加工画像をランドマーク位置合わせし、元フレームの目元領域
-  （まつ毛・まぶた・まばたきの動きごと）をフェザー付きで貼り戻して MP4 を出力
-- 商品ピクセルは幾何変換せず、元フレームの目元領域をそのまま貼り戻す（変形するのはAI加工画像側）。
-  最終 MP4 は H.264 再エンコードを経る
-
-## サーバについて
-https://matuge-change.onrender.com/　で起動中。カタログにサンプルを保存してます
-
-## セットアップ（Docker / WSL 推奨）
-
-Windows の WSL2（Docker Desktop でも可）で動かす場合は Docker だけで完結する。
-Python も MediaPipe モデルも用意不要。
+Docker or WSL2 is recommended. This path does not require a host Python environment or a manually installed
+MediaPipe model.
 
 ```bash
 git clone https://github.com/okajun35/matuge-change.git
@@ -466,194 +132,75 @@ cd matuge-change
 docker compose up --build
 ```
 
-ブラウザ（Windows 側）で http://localhost:8000 を開く。
+Open <http://localhost:8000> after `docker compose ps` reports `healthy`. The initial dependency download and
+MediaPipe/numba startup may take some time.
 
-- 初回ビルドは依存のDLで数分かかる。起動後も MediaPipe / numba のインポートに
-  30〜60 秒かかるため、すぐ開けない場合は少し待つ（`docker compose ps` が healthy になれば準備完了）
-- 抽出結果・カタログはホスト側の `./data` に残る（コンテナを作り直しても消えない）
-- 停止は `docker compose down`、コード更新後は `docker compose up --build`
-- Supabase を使う場合は `.env` に `SUPABASE_URL` 等を書けば compose が読み込む（未設定なら `data/` のローカル実装で動く）
-
-## セットアップ（ローカル Python 環境）
-
-```bash
-uv venv --python 3.11 .venv
-. .venv/bin/activate
-uv pip install -r requirements.txt
-curl -sL -o models/face_landmarker.task --create-dirs \
-  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
-```
-
-## テスト・Lint
-
-```bash
-uv pip install -r requirements-dev.txt
-python -m pytest          # テスト
-ruff check                # Lint
-ruff format               # フォーマット
-```
-
-pre-commit（commit 時に自動で lint / format / 各種チェック）:
-
-```bash
-pre-commit install
-pre-commit run --all-files   # 手動で全ファイルにかける場合
-```
-
-GitHub Actions（`.github/workflows/ci.yml`）で PR / main push 時に
-`ruff check` / `ruff format --check` と `pytest` が実行される。
-
-## 品質評価（Synthetic Benchmark）
-
-抽出・保持・再合成の品質を数値で測る環境が `evaluation/` にある。正解Mask/Alphaが既知の
-合成データを自動生成し、既存パイプラインをそのまま流して IoU / Dice / RGB fidelity /
-補間によるピクセル変質を測る（productionコードは変更しない）。
-
-```bash
-python scripts/generate_benchmark.py --cases 100 --clean          # データセット生成（外部データ不要）
-python scripts/run_evaluation.py --output evaluation-results      # 実行 → report.md / summary.csv
-```
-
-**数値は3層に分けて読む**（詳細は [evaluation/README.md](evaluation/README.md) §0）。
-
-- **A** コードパスの性質（補間・ROI縮小など）… 合成に依存しないので実写でもそのまま有効
-- **B** 相対・頑健性の傾向（どの条件で崩れるか）… 方向性は信頼できる
-- **C** 絶対スコア（Dice 等）… **実写性能を示さない。回帰検出の基準値としてのみ使う**
-
-目的・指標の定義・**合成データの限界**は [evaluation/README.md](evaluation/README.md)、
-現行mainの実測結果と見つかった問題は [docs/benchmark-findings.md](docs/benchmark-findings.md)。
-
-## 技術ドキュメント
-
-アルゴリズム・設計:
-
-- [docs/design-philosophy.md](docs/design-philosophy.md) — 設計思想（なぜ商品を生成AIに任せないのか、商品領域に許す操作、保持の限界）
-- [docs/static-image-algorithm.md](docs/static-image-algorithm.md) — 静止画モードの全処理（対象物としての難しさ / ROI / Evidence / Trimap / Alpha Matting / 再合成 / コード対応表）
-- [docs/video-algorithm.md](docs/video-algorithm.md) — 動画モードの全処理（ベストフレーム選択 / 目元 Soft Mask / AI 画像の位置合わせ / 合成 / 不採用方式 / コード対応表）
-- [docs/video-approach.md](docs/video-approach.md) — 顔固定・まばたき動画への対応方針（目元領域まるごと差し替え方式、スタビライズ）と却下案
-- [docs/video-expression-matting.md](docs/video-expression-matting.md) — 表情変化が大きい動画への発展案
-- [docs/ai-editing-api.md](docs/ai-editing-api.md) — AI モデル加工（Gemini / FLUX 等）の API 選定と Adapter 設計、目元保護マスク
-
-品質評価:
-
-- [evaluation/README.md](evaluation/README.md) — Synthetic Benchmark（目的・生成方法・指標定義・限界・数値の読み方）
-- [docs/benchmark-findings.md](docs/benchmark-findings.md) — Benchmarkで分かった現行アルゴリズムの課題と優先順位
-
-実装・運用・開発体制:
-
-- [docs/supabase-phase-b.md](docs/supabase-phase-b.md) — カタログ / 形状類似検索 / Matting ジョブ進捗の Supabase 連携
-- [docs/session-provenance.md](docs/session-provenance.md) — 元画像 / 合成元 / 合成結果と実行履歴のローカル保存
-- [docs/devin-supabase-usage.md](docs/devin-supabase-usage.md) — Devin をどう使って開発したか（git 履歴ベース）と Supabase の用途まとめ
-- [docs/handover.md](docs/handover.md) — 引き継ぎメモ（採用/却下した方式とその理由、既知の落とし穴、未検証事項）
-
-## 起動
-
-```bash
-. .venv/bin/activate
-uvicorn backend.app:app --host 0.0.0.0 --port 8000
-```
-
-ブラウザで http://localhost:8000 を開く。画面はページごとに分かれている。
-
-| URL | 画面 |
+| URL | Page |
 | --- | --- |
-| `/` | 商品カタログ（登録済み商品の一覧・類似検索） |
-| `/extract.html` | 静止画モード（まつ毛 Alpha 抽出・再合成） |
-| `/video.html` | 動画モード（ベストフレーム選択・目元領域差し替え合成） |
+| `/` | Product catalog |
+| `/extract.html` | Still-image mode |
+| `/video.html` | Video mode |
 
-### Supabase 連携（任意）
+Extraction results and catalog data remain in `./data` on the host. See
+[Development environment and quality checks (Japanese)](docs/development.md) for local Python setup and
+testing instructions.
 
-環境変数が揃っているときだけ、カタログ・類似検索・ジョブ進捗が Supabase
-（Postgres + pgvector + Storage + Realtime）に切り替わる。未設定なら `data/` 配下の
-ローカル実装で同じ機能が動く。
+## Basic usage
+
+### Still images
+
+For normal cases, use the simple workflow at `/extract.html`.
+
+1. Select the product photo, in which the person is wearing the lashes, and the AI-edited photo
+2. Select **Run processing** to perform analysis, matting, and recomposition
+3. Compare the result with the original and save the completed PNG
+4. If extraction or placement is insufficient, open the detailed controls and adjust the ROIs, three-state
+   brush, thresholds, or alignment
+
+A photo without the product is optional and available in the detailed controls. For side profiles and eye
+close-ups that automatic face detection cannot handle, manually specify ROI-A for extraction and ROI-B for
+placement.
+
+### Video
+
+1. Analyze a video of a person wearing the product at `/video.html`
+2. Save the selected best frame
+3. Edit the person with an external AI service, instructing it not to alter the eye area
+4. Upload the AI-edited image and run video compositing
+5. Review the preview and save the MP4
+
+## Quality evaluation
+
+The `evaluation/` directory contains a Synthetic Benchmark that runs production code against generated data
+with known ground-truth masks and alpha. Results must be interpreted in three layers:
+
+- **A**: Properties of the code path that also apply to real images
+- **B**: Relative trends and robustness across conditions
+- **C**: Absolute scores on synthetic data, used only for regression detection—not as real-image accuracy
+
+See [evaluation/README.md](evaluation/README.md) for the procedure, metrics, and limitations of synthetic data,
+and [docs/benchmark-findings.md](docs/benchmark-findings.md) for known issues in the current implementation.
+
+## Development
 
 ```bash
-export SUPABASE_URL=https://<project-ref>.supabase.co
-export SUPABASE_SERVICE_ROLE_KEY=...   # サーバー専用（ブラウザへは渡さない）
-export SUPABASE_PUBLISHABLE_KEY=...    # Realtime 購読用
+. .venv/bin/activate
+python -m pytest
+ruff check
+pre-commit run --all-files
 ```
 
-### Matting のメモリ設定（環境変数）
+Features and bug fixes follow test-driven development: add a failing test first, implement the minimum fix,
+then refactor while keeping the test green. See [AGENTS.md](AGENTS.md) for repository-specific rules and
+[docs/development.md](docs/development.md) for environment setup and commands.
 
-Matting（closed-form solve）のピークメモリは解く画素数に比例し、実測で約 3MB / 1000px。
-依存ライブラリの常駐が約 287MB あるため、Render Starter のような 512MB ホストでは ROI 全体を
-一度に解くと OOM（502）になる。既定は**品質優先の full**で、低メモリ環境だけ tiled に切り替える。
+## Documentation
 
-| 環境変数 | 既定値 | 意味 |
-| --- | --- | --- |
-| `MATTE_SOLVE_MODE` | `full` | `full` = ROI 全体を一度に solve（従来と同じ出力）。`tiled` = solve window をタイル分割する低メモリ近似。それ以外の値は設定エラー |
-| `MATTE_MAX_SOLVE_PIXELS` | `60000` | tiled モードでの 1 solve あたりの画素上限。**context（ラベル探索で広げた範囲）を含めた solver 入力の絶対上限**で、超える solve は行わない。`0` は明示的な無制限。負数・数値でない文字列は設定エラー（誤設定で上限が外れて OOM に戻るのを防ぐ）。full モードでは使わない |
-| `MATTE_MAX_WORKERS` | `1` | Matting の同時実行数。同期 `POST /api/matte` と非同期ジョブが**同じプロセス共通ゲート**を通るので、1 ならピークを作る処理がプロセス全体で同時に走らない |
-| `MATTE_LOG_LEVEL` | `INFO` | 下記の matte ログのレベル。`WARNING` 以上にすると起動時・実行時の行は出なくなる |
-| `MATTE_DETECT_MAX_SIDE` | `1600` | 顔検出（MediaPipe）に渡す画像の長辺上限。`0` で縮小しない（元解像度で検出）。負数・数値でない文字列は設定エラー。**縮小するのは検出に渡すコピーだけで、まつ毛を抽出する ROI は常に元画像のフル解像度から切り出す**。MediaPipe は内部でモデル入力サイズまで縮小するので巨大入力は検出精度に寄与せず、12MP を渡すと RGB コピー 36MB と内部バッファだけが増える。影響は landmark が数px動いて ROI 枠がわずかにずれる点（実写で 1100x577 → 1100x566） |
+The complete documentation index is in [docs/README.md](docs/README.md). Key documents:
 
-Render など 512MB 環境のみ以下を設定する。
-
-```bash
-MATTE_SOLVE_MODE=tiled
-MATTE_MAX_SOLVE_PIXELS=60000
-MATTE_MAX_WORKERS=1
-```
-
-`tiled` は full solve の**近似**であり、full と完全一致はしない（比較値は
-`docs/handover.md`）。メモリに余裕がある環境では既定の `full` を使う。どちらで生成したかは
-実行履歴（`GET /api/sessions/{id}/runs`）の `solve_mode` / `max_solve_pixels` に残る。
-
-tiled の各 solve には FG/BG 両ラベルが必要なので、タイル内にラベルが無ければ画素上限の範囲で
-context を広げ、それでも届かない場合は上限内で**縦長／横長の帯**に変形し、さらにタイルを分割して
-探す（上限は常に守る）。上限が小さすぎてどう分割してもラベルに届かない場合は
-`MATTE_MAX_SOLVE_PIXELS` を上げる／`full` にするよう促す**設定エラー**にする。黙って ROI 全体を
-解いて OOM に戻ることも、Unknown を一律 0/1 に潰すこともしない。
-
-### 512MB ホストでは numba キャッシュを焼いたイメージを使う
-
-`pymatting` の numba 関数は**初回 import で JIT コンパイルされ、そこで一時的に RSS 490MB** 使う。
-glibc はそのヒープをOSに返さないため、キャッシュが無いまま起動したコンテナは
-リクエストを受ける前から常駐 575MB になり、512MB ホストでは解析開始で OOM kill（502）される。
-`Dockerfile` はビルド時に `python -c "import pymatting"` を実行してキャッシュをイメージへ焼くので、
-**本番イメージをそのままデプロイすること**（常駐 273MB）。独自のイメージや起動方法を使う場合は
-同じ温めを入れる。venv での計測ではキャッシュが既にあるため、この問題は再現しない。
-
-numba のキャッシュキーは**対象CPU名を含む**ので、ビルドホストと実行ホストのCPUが違うと
-焼いたキャッシュが無視されて起動時に再コンパイルされる（＝OOMに戻る）。`Dockerfile` は
-温めの前に `NUMBA_CPU_NAME=generic` / `NUMBA_CPU_FEATURES=""` を **ENV** で置いて
-ビルド時と実行時が同じ移植可能ターゲットを選ぶようにしている。この2つを消したり
-実行時に上書きしたりしない。
-
-### どのモードで動いているかをログで確認する
-
-デプロイ先の設定が効いているかは stdout のログで確認できる（Render のログにそのまま出る）。
-起動時に 1 行、Matting 実行ごとに 1 行出る。
-
-```text
-matte settings: solve_mode=tiled max_solve_pixels=60000 max_workers=1
-matte run: solve_mode=tiled roi=1100x600 max_solve_pixels=60000 solves=24 max_solve_px=59400 elapsed_ms=8123
-matte waiting for a matting slot: active=1 max_workers=1
-```
-
-- `matte settings` — 起動時の実効設定。環境変数が未設定なら「既定」であることも添える。設定値が
-  不正な場合はここに `ERROR` で出る（トレースバックで起動を落とさない）
-- `matte run` — その実行が実際に使ったモード・ROI サイズ・solve 回数・**最大の solver 入力面積**
-  （`max_solve_px` が `max_solve_pixels` を超えていたら tiled の上限が破れている）・所要時間
-- `matte waiting for a matting slot` — 共通ゲートが埋まっていて待たされた実行。`MATTE_MAX_WORKERS=1`
-  で 2 人が同時に押すと出る（順番待ちで、失敗ではない）
-
-## 使い方（静止画モード: `/extract.html`）
-
-1. 装着画像（必要なら未装着画像も）をアップロードして「解析開始」
-2. 表示レイヤーを Probability に切り替えて初期推定を確認
-3. ＋商品 / ？中間 / −背景 ブラシで必要な箇所だけ補正（中間は Trimap の Unknown 帯に強制し Matting に境界判定を任せる）。ストローク単位で Undo/Redo 可能（↶/↷ ボタン or Ctrl+Z / Ctrl+Y）
-4. 「Matting実行」→ Alpha / Product RGBA / 未装着画像への再合成を確認
-5. FG/BG 閾値スライダーで Trimap を調整して再実行可能
-6. AI 加工済みのモデル画像を「編集済み画像」に選択して「再合成」→ 抽出まつ毛を位置合わせして合成
-7. 「表示中レイヤーを保存」で表示中の画像を PNG ダウンロード
-8. 商品名を入れて「この抽出結果を商品として登録」→ カタログ（`/`）のカードをクリックすると形状の近い商品を表示
-9. ブラシ補正はストローク単位で自動保存される。セッションID を入力して「再開」すると復元できる
-
-## 使い方（動画モード: `/video.html`）
-
-1. 動画を選択して「解析開始」
-2. 選択されたベストフレームを「ベストフレームを保存」でダウンロード
-3. 外部 AI でベストフレームを加工（目元は変えない指示を推奨）
-4. 加工済み画像を「AI加工済み画像」に選択し、必要なら「目元領域の広さ」を調整して「動画合成」
-5. 合成結果をプレビューし、「合成動画を保存」で MP4 ダウンロード
+- [Project background (Japanese)](docs/project-background.md)
+- [Design philosophy (Japanese)](docs/design-philosophy.md)
+- [Still-image algorithm (Japanese)](docs/static-image-algorithm.md)
+- [Video algorithm (Japanese)](docs/video-algorithm.md)
+- [Deployment and operations (Japanese)](docs/deployment.md)
+- [Engineering handover notes (Japanese)](docs/handover.md)
