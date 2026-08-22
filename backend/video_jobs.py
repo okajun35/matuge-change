@@ -75,12 +75,19 @@ class VideoJob:
                 "error": self.error,
             }
 
+    def is_finished(self) -> bool:
+        with self._lock:
+            return self.status in {"done", "failed"}
+
 
 class VideoJobRunner:
     """Runs one video at a time to keep memory use bounded and exposes status for polling."""
 
-    def __init__(self, workers: int = 1) -> None:
+    def __init__(self, workers: int = 1, max_retained_jobs: int = 100) -> None:
+        if max_retained_jobs < 1:
+            raise ValueError("max_retained_jobs must be positive")
         self._executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="video")
+        self._max_retained_jobs = max_retained_jobs
         self._jobs: dict[str, VideoJob] = {}
         self._futures: dict[str, Future] = {}
         self._lock = threading.Lock()
@@ -89,11 +96,15 @@ class VideoJobRunner:
         job = VideoJob(id=uuid.uuid4().hex, session_id=session_id)
         with self._lock:
             self._jobs[job.id] = job
-            self._futures[job.id] = self._executor.submit(self._run, job, work)
+        future = self._executor.submit(self._run, job, work)
+        with self._lock:
+            self._futures[job.id] = future
+        future.add_done_callback(lambda _future: self._finish(job.id))
         return job.id
 
     def get(self, job_id: str) -> VideoJob | None:
         with self._lock:
+            self._prune_jobs_locked()
             return self._jobs.get(job_id)
 
     def wait(self, job_id: str, timeout: float | None = None) -> None:
@@ -109,3 +120,13 @@ class VideoJobRunner:
             job.complete(work(job.report))
         except Exception as exc:
             job.fail(exc)
+
+    def _finish(self, job_id: str) -> None:
+        with self._lock:
+            self._futures.pop(job_id, None)
+            self._prune_jobs_locked()
+
+    def _prune_jobs_locked(self) -> None:
+        finished = [job_id for job_id, job in self._jobs.items() if job.is_finished()]
+        for job_id in finished[: -self._max_retained_jobs]:
+            self._jobs.pop(job_id, None)

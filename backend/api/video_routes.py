@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import tempfile
+import uuid
 from collections.abc import Callable
+from contextlib import suppress
 
 import cv2
 import numpy as np
@@ -15,6 +17,7 @@ from backend import video
 from backend.api.container import container
 from backend.api.errors import read_upload, to_http
 from backend.lash_extraction import detect_landmarks
+from backend.sessions.errors import FaceNotDetected
 from backend.video_jobs import VideoJobRunner
 
 router = APIRouter(prefix="/api/video")
@@ -30,6 +33,38 @@ def _frame_path(session_id: str, index: int) -> str:
 
 def _no_progress(_phase: str, _progress: int, _done: int | None, _total: int | None, _message: str) -> None:
     """Adapter for the synchronous compatibility endpoints."""
+
+
+def _load_persisted_frames(session_id: str, frame_count: int) -> list[np.ndarray]:
+    frames = []
+    for index in range(frame_count):
+        frame = cv2.imread(_frame_path(session_id, index))
+        if frame is None:
+            raise ValueError(f"could not read persisted video frame {index}")
+        frames.append(frame)
+    return frames
+
+
+def _persist_queued_edited_image(session_id: str, upload: UploadFile) -> str:
+    """Validate an edited upload, then keep only its path while a job is queued."""
+    edited = read_upload(upload)
+    path = container().store.path(session_id, f"queued_edited_{uuid.uuid4().hex}.png")
+    if not cv2.imwrite(path, edited):
+        raise HTTPException(500, "could not persist edited image for video job")
+    return path
+
+
+def _load_queued_edited_image(path: str) -> np.ndarray:
+    edited = cv2.imread(path)
+    if edited is None:
+        raise ValueError("could not read queued edited image")
+    return edited
+
+
+def _remove_queued_edited_image(path: str | None) -> None:
+    if path is not None:
+        with suppress(FileNotFoundError):
+            os.remove(path)
 
 
 def _analyze_video(
@@ -89,11 +124,11 @@ def _compose_video(session_id: str, edited: np.ndarray, expand: float, report: V
     report("validate_edited", 68, None, None, "加工画像を確認しています")
     lms_edited = detect_landmarks(edited)
     if lms_edited is None:
-        raise ValueError("no face detected in the edited image")
+        raise FaceNotDetected("no face detected in the edited image")
 
     store = container().store
     meta = store.load_meta(session_id)
-    frames = [cv2.imread(_frame_path(session_id, index)) for index in range(meta["frame_count"])]
+    frames = _load_persisted_frames(session_id, meta["frame_count"])
     stacked = store.load_array(session_id, "video_landmarks")
     landmarks: list[np.ndarray | None] = [None if np.isnan(lms).any() else lms for lms in stacked]
 
@@ -159,7 +194,7 @@ async def create_video_session(video_file: UploadFile = File(..., alias="video")
 async def start_video_job(
     video_file: UploadFile = File(..., alias="video"),
     edited_image: UploadFile | None = File(None),
-    expand: float = Form(0.45),
+    expand: float = Form(0.45, ge=0.0, le=1.0),
 ):
     """Queue analysis, and compose immediately when an edited image is already supplied."""
     store = container().store
@@ -168,14 +203,18 @@ async def start_video_job(
     with open(video_path, "wb") as destination:
         destination.write(video_file.file.read())
 
-    edited = read_upload(edited_image) if edited_image is not None else None
+    edited_path = _persist_queued_edited_image(session_id, edited_image) if edited_image is not None else None
 
     def work(report: VideoReport) -> dict:
-        analyzed = _analyze_video(session_id, video_path, report, select_best=edited is None)
-        if edited is None:
-            return analyzed
-        composed = _compose_video(session_id, edited, expand, report)
-        return analyzed | composed
+        try:
+            analyzed = _analyze_video(session_id, video_path, report, select_best=edited_path is None)
+            if edited_path is None:
+                return analyzed
+            edited = _load_queued_edited_image(edited_path)
+            composed = _compose_video(session_id, edited, expand, report)
+            return analyzed | composed
+        finally:
+            _remove_queued_edited_image(edited_path)
 
     job_id = video_jobs.submit(session_id, work)
     return {"job_id": job_id, "session_id": session_id}
@@ -185,7 +224,7 @@ async def start_video_job(
 async def start_compose_job(
     session_id: str,
     edited_image: UploadFile = File(...),
-    expand: float = Form(0.45),
+    expand: float = Form(0.45, ge=0.0, le=1.0),
 ):
     """Queue a recompose of an already analyzed video session."""
     store = container().store
@@ -196,8 +235,15 @@ async def start_compose_job(
         raise to_http(exc) from exc
     if meta.get("type") != "video":
         raise HTTPException(409, "not a video session")
-    edited = read_upload(edited_image)
-    job_id = video_jobs.submit(session_id, lambda report: _compose_video(session_id, edited, expand, report))
+    edited_path = _persist_queued_edited_image(session_id, edited_image)
+
+    def work(report: VideoReport) -> dict:
+        try:
+            return _compose_video(session_id, _load_queued_edited_image(edited_path), expand, report)
+        finally:
+            _remove_queued_edited_image(edited_path)
+
+    job_id = video_jobs.submit(session_id, work)
     return {"job_id": job_id, "session_id": session_id}
 
 
@@ -213,7 +259,7 @@ async def get_video_job(job_id: str):
 async def compose_video(
     session_id: str = Form(...),
     edited_image: UploadFile = File(...),
-    expand: float = Form(0.45),
+    expand: float = Form(0.45, ge=0.0, le=1.0),
 ):
     store = container().store
     try:
@@ -225,16 +271,11 @@ async def compose_video(
         raise HTTPException(409, "not a video session")
 
     edited = read_upload(edited_image)
-    lms_edited = detect_landmarks(edited)
-    if lms_edited is None:
-        raise HTTPException(422, "no face detected in the edited image")
-
-    stacked = store.load_array(session_id, "video_landmarks")
-    frames = [cv2.imread(_frame_path(session_id, i)) for i in range(meta["frame_count"])]
-    landmarks: list[np.ndarray | None] = [None if np.isnan(lms).any() else lms for lms in stacked]
-    outs = video.compose_frames(frames, landmarks, edited, lms_edited, expand, meta["fps"])
-    video.write_video(outs, meta["fps"], store.path(session_id, "output.mp4"))
-    return {"video": "output", "frame_count": len(outs)}
+    try:
+        result = _compose_video(session_id, edited, expand, _no_progress)
+    except Exception as exc:
+        raise to_http(exc) from exc
+    return {"video": "output", "frame_count": result["frame_count"]}
 
 
 @router.get("/{session_id}/{name}")

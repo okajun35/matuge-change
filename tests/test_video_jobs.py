@@ -31,3 +31,17 @@ def test_video_job_reports_frame_progress_and_result():
     assert done.to_dict()["status"] == "done"
     assert done.to_dict()["progress"] == 100
     assert done.to_dict()["result"] == {"session_id": "video-session", "frame_count": 10, "composed": True}
+
+
+def test_video_job_runner_prunes_completed_jobs_and_futures():
+    runner = VideoJobRunner(workers=1, max_retained_jobs=2)
+    job_ids = []
+    for index in range(3):
+        job_id = runner.submit(f"session-{index}", lambda _report, i=index: {"index": i})
+        runner.wait(job_id, timeout=2)
+        job_ids.append(job_id)
+
+    assert runner.get(job_ids[0]) is None
+    assert runner.get(job_ids[1]) is not None
+    assert runner.get(job_ids[2]) is not None
+    assert runner._futures == {}

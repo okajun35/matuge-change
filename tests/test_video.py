@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend import video
+from backend.api import video_routes
 from backend.app import DATA_DIR, app
 
 client = TestClient(app)
@@ -344,6 +345,72 @@ class TestVideoComposeApi:
         )
         assert res.status_code == 422
         assert "no face" in res.json()["detail"]
+
+    def test_corrupt_persisted_frame_returns_clear_error(self, fake_video_session, monkeypatch):
+        frame_path = os.path.join(DATA_DIR, fake_video_session, "frames", "000002.png")
+        with open(frame_path, "wb") as frame_file:
+            frame_file.write(b"corrupt")
+        monkeypatch.setattr(video_routes, "detect_landmarks", lambda _image: make_landmarks(0.5))
+
+        res = client.post(
+            "/api/video/compose",
+            data={"session_id": fake_video_session},
+            files={"edited_image": ("e.png", encode_png(np.zeros((400, 400, 3), np.uint8)))},
+        )
+
+        assert res.status_code == 400
+        assert "could not read persisted video frame 2" in res.json()["detail"]
+
+
+class TestVideoJobApi:
+    @pytest.mark.parametrize("expand", [-0.01, 1.01])
+    def test_rejects_expand_outside_supported_range(self, expand):
+        res = client.post(
+            "/api/video/jobs",
+            data={"expand": str(expand)},
+            files={"video": ("a.mp4", b"not decoded because validation runs first")},
+        )
+        assert res.status_code == 422
+
+    def test_initial_job_closure_does_not_retain_decoded_edited_image(self, monkeypatch):
+        captured = {}
+
+        def capture_submit(session_id, work):
+            captured["session_id"] = session_id
+            captured["work"] = work
+            return "job-id"
+
+        monkeypatch.setattr(video_routes.video_jobs, "submit", capture_submit)
+        res = client.post(
+            "/api/video/jobs",
+            files={
+                "video": ("a.mp4", b"queued video"),
+                "edited_image": ("e.png", encode_png(np.zeros((400, 400, 3), np.uint8))),
+            },
+        )
+        try:
+            assert res.status_code == 202
+            closure_values = [cell.cell_contents for cell in captured["work"].__closure__ or ()]
+            assert not any(isinstance(value, np.ndarray) for value in closure_values)
+        finally:
+            shutil.rmtree(os.path.join(DATA_DIR, captured["session_id"]), ignore_errors=True)
+
+    def test_compose_job_closure_does_not_retain_decoded_edited_image(self, fake_video_session, monkeypatch):
+        captured = {}
+
+        def capture_submit(_session_id, work):
+            captured["work"] = work
+            return "job-id"
+
+        monkeypatch.setattr(video_routes.video_jobs, "submit", capture_submit)
+        res = client.post(
+            f"/api/video/{fake_video_session}/compose/jobs",
+            files={"edited_image": ("e.png", encode_png(np.zeros((400, 400, 3), np.uint8)))},
+        )
+
+        assert res.status_code == 202
+        closure_values = [cell.cell_contents for cell in captured["work"].__closure__ or ()]
+        assert not any(isinstance(value, np.ndarray) for value in closure_values)
 
 
 class TestVideoServing:
